@@ -1,0 +1,17 @@
+{
+  "name": "fake-linkedin-reporter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Crowd-sourced fake LinkedIn profile reporting: Chrome extension + Cloudflare Worker leaderboard.",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "dev:wrangler": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute flr --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute flr --local --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}
