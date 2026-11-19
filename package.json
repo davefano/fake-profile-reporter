@@ -3,15 +3,25 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Crowd-sourced fake LinkedIn profile reporting: Chrome extension + Cloudflare Worker leaderboard.",
+  "description": "Crowd-sourced fake LinkedIn profile reporting: browser extension + API.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "tools/*"
+  ],
   "scripts": {
-    "dev": "node scripts/dev-server.mjs",
-    "dev:wrangler": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute flr --remote --file=./schema.sql",
-    "db:init:local": "wrangler d1 execute flr --local --file=./schema.sql"
+    "dev:api": "bun run --cwd apps/worker dev",
+    "dev:ext": "bun run --cwd apps/extension dev",
+    "dev:ext:firefox": "bun run --cwd apps/extension dev:firefox",
+    "build:ext": "bun run --cwd apps/extension build:all",
+    "db:init:local": "bun run --cwd apps/worker db:init:local",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun test",
+    "capture": "bun tools/capture/capture.ts"
   },
   "devDependencies": {
-    "wrangler": "^3.90.0"
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
   }
 }

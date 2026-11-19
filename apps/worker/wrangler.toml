@@ -1,0 +1,23 @@
+name = "fake-linkedin-reporter"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "flr"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# KV used for per-IP cooldown + daily rate limits.
+[[kv_namespaces]]
+binding = "RATE_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Raw profile snapshots (gzipped JSON), keyed snapshots/<memberId>/<time>.json.gz
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "flr-snapshots"
+
+[vars]
+# Salt for anonymous IP hashing. Override in production with:
+#   wrangler secret put IP_SALT
+IP_SALT = "dev-salt"

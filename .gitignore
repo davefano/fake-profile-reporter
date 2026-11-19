@@ -13,3 +13,6 @@ coverage/
 !.dev.vars.example
 *.pem
 *.key
+.output/
+.wxt/
+web-ext.config.ts

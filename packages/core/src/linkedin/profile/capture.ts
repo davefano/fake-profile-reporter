@@ -1,0 +1,55 @@
+// Captures a RawSnapshot (the raw payloads) for one profile. Signed in, so it
+// must run in a www.linkedin.com page context. Makes 6 requests; keep usage to
+// one profile at a time. Turn it into facts with extractProfileFacts().
+
+import { activityRequest, aboutRequest, endpoints } from '../endpoints';
+import { profileIdFromUrn } from '../ids';
+import { sessionFrom, type LinkedInSession, type SessionOptions } from '../session';
+import { SNAPSHOT_SCHEMA, type RawSnapshot } from './snapshot';
+
+export interface CaptureOptions extends SessionOptions {
+  session?: LinkedInSession;
+  /** The Activity card is several MB; skip it when you don't need activity. */
+  includeActivity?: boolean;
+}
+
+export async function captureProfile(slug: string, opts: CaptureOptions = {}): Promise<RawSnapshot> {
+  const s = sessionFrom(opts);
+  const snap: RawSnapshot = { schema: SNAPSHOT_SCHEMA, capturedAt: Date.now(), slug, profileId: null, payloads: {}, errors: {} };
+  const attempt = async <K extends keyof RawSnapshot['payloads']>(key: K, fn: () => Promise<RawSnapshot['payloads'][K]>) => {
+    try {
+      snap.payloads[key] = await fn();
+    } catch (e) {
+      snap.errors[key] = String((e as Error)?.message ?? e);
+    }
+  };
+
+  await attempt('resolve', () => s.voyager(endpoints.resolve(slug)));
+  const resolved = (snap.payloads.resolve as any)?.included?.find((e: any) => e?.entityUrn?.startsWith('urn:li:fsd_profile:'));
+  snap.profileId = profileIdFromUrn(resolved?.entityUrn);
+
+  await attempt('fullProfile', () => s.voyager(endpoints.fullProfile(slug)));
+  await attempt('profilePageCounts', async () => {
+    const html = await s.html(endpoints.profilePage(slug));
+    // The number and the word can sit in separate elements:
+    // <p>500+</p></div>…<p>connections</p>. Normalise to "500+ connections".
+    const re = />\s*([\d,.]+\+?)\s*(?:<[^>]{0,300}>\s*){0,8}(connections?|followers?)\b|([\d,.]+\+?)\s+(connections?|followers?)\b/g;
+    // "Lara and David are mutual connections", "Sam, Lee, and 12 other mutual connections".
+    // Names are wrapped in inline tags (<strong>Lara</strong> and <strong>David</strong> …), so
+    // take the whole run of text and inline tags, then strip the tags.
+    const run = />((?:[^<]|<\/?(?:strong|span|b|em)\b[^>]*>){0,800}?\bmutual connections?)/.exec(html)?.[1];
+    snap.payloads.profilePageMutual = run ? run.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : null;
+    return [...new Set([...html.matchAll(re)].map((m) => `${m[1] ?? m[3]} ${m[2] ?? m[4]}`))];
+  });
+
+  if (snap.profileId) {
+    const profileId = snap.profileId;
+    await attempt('followingState', () => s.voyager(endpoints.followingState(profileId)));
+    await attempt('about', () => s.rsc(aboutRequest(profileId, slug)));
+  } else {
+    snap.errors.followingState = snap.errors.about = 'no profileId';
+  }
+  if (opts.includeActivity !== false) await attempt('activity', () => s.rsc(activityRequest(slug)));
+
+  return snap;
+}
