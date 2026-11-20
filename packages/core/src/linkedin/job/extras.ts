@@ -2,7 +2,7 @@
 // listing dates and reposts, state, hiring team, and the "Verified job" badge.
 
 import { endpoints } from '../endpoints';
-import { sessionFrom, type LinkedInSession, type SessionOptions } from '../session';
+import { sessionFrom, type ReaderOptions } from '../session';
 
 export interface JobExtras {
   /** Where "Apply" sends you, for jobs that apply on another site. */
@@ -48,7 +48,7 @@ export function pageShowsVerifiedJob(html: string): boolean {
   return /aria-label="Verified job"|\(Verified job\)/.test(html);
 }
 
-export async function fetchJobExtras(jobId: string, opts: { session?: LinkedInSession } & SessionOptions = {}): Promise<JobExtras> {
+export async function fetchJobExtras(jobId: string, opts: ReaderOptions = {}): Promise<JobExtras> {
   const s = sessionFrom(opts);
   const record = parseJobRecord(await s.voyager(endpoints.jobRecord(jobId)));
   let verified: boolean | null = null;

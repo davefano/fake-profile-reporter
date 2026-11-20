@@ -7,14 +7,6 @@ import type { LeaderboardResponse } from '@flr/core';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
 import { send, type ErrorResponse } from '@/lib/runtime';
 
-export { isError, type ErrorResponse } from '@/lib/runtime';
-export { linkedInTarget } from '@flr/core/linkedin';
-
-export interface ApiResponse<T> {
-  status: number;
-  data: T;
-}
-
 /** Local history the panel shows next to any scan. */
 interface History {
   /** Changes since the last time this browser checked it. */
@@ -25,7 +17,7 @@ interface History {
   cached: boolean;
 }
 
-export interface ProfileScan extends ProfileResult, History {
+export interface ProfileScan extends Omit<ProfileResult, 'snapshotGzipBase64'>, History {
   kind: 'profile';
   score: Score;
 }
@@ -63,10 +55,7 @@ export interface AppMessages {
   FLR_SCAN: { req: { type: 'FLR_SCAN'; force?: boolean }; res: ScanResponse };
   /** Save to the directory, optionally reporting it. `key` is scanKey(). */
   FLR_SUBMIT: { req: { type: 'FLR_SUBMIT'; key: string; report: boolean }; res: SubmitResponse };
-  FLR_LEADERBOARD: { req: { type: 'FLR_LEADERBOARD' }; res: ApiResponse<Partial<LeaderboardResponse>> | ErrorResponse };
-  FLR_CONFIG: { req: { type: 'FLR_CONFIG' }; res: { API_BASE: string } };
+  FLR_LEADERBOARD: { req: { type: 'FLR_LEADERBOARD' }; res: LeaderboardResponse | ErrorResponse };
 }
-
-export type AppRequest = AppMessages[keyof AppMessages]['req'];
 
 export const sendMessage = <K extends keyof AppMessages>(msg: AppMessages[K]['req']) => send<AppMessages, K>(msg);

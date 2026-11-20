@@ -132,7 +132,6 @@ export function fakeSnapshot(p: FakeProfile = {}): RawSnapshot {
       name: `Skill ${i}`,
     })),
   ];
-  if (photo === undefined) (included[0] as any).profilePicture = undefined;
 
   const joinedAt = p.joinedAt === undefined ? Date.UTC(2016, 2, 15) : p.joinedAt;
   const verifications = p.verifications ?? [];

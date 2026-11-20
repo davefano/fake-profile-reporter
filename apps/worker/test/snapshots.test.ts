@@ -11,10 +11,10 @@ beforeEach(() => {
   env = { DB: createTestD1(), RATE_KV: createTestKv(), SNAPSHOTS: createTestR2(), IP_SALT: 'test' };
 });
 
-function post(body: unknown, { gzip = false, ip = '1.1.1.1' } = {}) {
+function post(body: unknown, { gzip = false, ip = '1.1.1.1', report = false } = {}) {
   const json = JSON.stringify(body);
   return app.request(
-    '/api/snapshots',
+    report ? '/api/snapshots?report=1' : '/api/snapshots',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip },
@@ -74,6 +74,57 @@ describe('POST /api/snapshots', () => {
   test('rate limits repeat captures of the same account from one IP', async () => {
     expect((await post(fakeSnapshot())).status).toBe(201);
     expect((await post(fakeSnapshot())).status).toBe(429);
+  });
+
+  test('an older snapshot uploaded late does not roll the account back', async () => {
+    await post(fakeSnapshot({ slug: 'new-slug', capturedAt: Date.UTC(2026, 10, 1) }), { ip: '1.1.1.1' });
+    const late = (await (await post(fakeSnapshot({ slug: 'old-slug', capturedAt: Date.UTC(2026, 8, 1) }), { ip: '2.2.2.2' })).json()) as any;
+    expect(late.changes).toEqual([]);
+    const got = (await (await app.request('/api/accounts/700000001', {}, env)).json()) as any;
+    expect(got.account.slug).toBe('new-slug');
+    expect(got.account.last_captured_at).toBe(Date.UTC(2026, 10, 1));
+    expect(got.account.first_captured_at).toBe(Date.UTC(2026, 8, 1));
+    expect(got.account.snapshot_count).toBe(2);
+  });
+
+  test('a gzip bomb is rejected before it is fully decompressed', async () => {
+    const bomb = gzipSync(Buffer.alloc(26 * 1024 * 1024, 0x20));
+    const res = await app.request('/api/snapshots', { method: 'POST', headers: { 'cf-connecting-ip': '1.1.1.1' }, body: bomb }, env);
+    expect(res.status).toBe(413);
+  });
+
+  test('mutual connections are neither stored nor scored', async () => {
+    const snap = fakeSnapshot();
+    snap.payloads.profilePageMutualCount = 12;
+    const data = (await (await post(snap, { gzip: true })).json()) as any;
+    expect(data.score.signals.map((x: any) => x.id)).not.toContain('trust.mutual');
+    const [, obj] = [...env.SNAPSHOTS.objects][0]!;
+    expect(JSON.parse(gunzipSync(obj.body).toString('utf8')).payloads.profilePageMutualCount).toBeUndefined();
+  });
+});
+
+describe('reports', () => {
+  test('?report=1 saves the snapshot and reports the account; the leaderboard ranks reported accounts', async () => {
+    const res = await post(fakeSnapshot({ memberId: 700_000_001, firstName: 'Alex' }), { report: true });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as any).reported).toBe(true);
+    await post(fakeSnapshot({ memberId: 700_000_002, firstName: 'Sam' }), { report: true, ip: '1.1.1.1' });
+    await post(fakeSnapshot({ memberId: 700_000_002, firstName: 'Sam' }), { report: true, ip: '2.2.2.2' });
+    await post(fakeSnapshot({ memberId: 700_000_003 })); // tracked, never reported
+
+    const board = (await (await app.request('/api/leaderboard', {}, env)).json()) as any;
+    expect(board.stats).toEqual({ reports: 3, accounts: 2 });
+    expect(board.rows.map((r: any) => [r.memberId, r.reports])).toEqual([[700_000_002, 2], [700_000_001, 1]]);
+    expect(board.rows[0]).toMatchObject({ name: 'Sam Sample', level: 'low', slug: 'jordan-sample-0a1b2c' });
+  });
+
+  test('a report still counts inside the snapshot cooldown, but only once a day', async () => {
+    expect((await post(fakeSnapshot())).status).toBe(201); // Track
+    expect((await post(fakeSnapshot(), { report: true })).status).toBe(201); // then Report
+    expect((await post(fakeSnapshot(), { report: true })).status).toBe(429);
+    const got = (await (await app.request('/api/accounts/700000001', {}, env)).json()) as any;
+    expect(got.reports).toBe(1);
+    expect(got.account.snapshot_count).toBe(1);
   });
 });
 

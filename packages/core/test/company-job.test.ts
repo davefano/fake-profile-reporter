@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { byClass, parseAgo, parseCount } from '../src/index';
-import { parseCompanyPage, scoreCompany, siteDomain } from '../src/index';
-import { extractContacts, parseJobPosting, parseSalary, scoreJob } from '../src/index';
-import { linkedInTarget } from '../src/index';
+import { byClass, parseAgo, parseCount, parseCompanyPage, siteDomain, extractContacts, parseJobPosting, parseSalary, linkedInTarget } from '../src/linkedin';
+import { scoreCompany, scoreJob } from '../src/scam';
 
 const NOW = Date.UTC(2026, 10, 18);
 const DAY = 86_400_000;

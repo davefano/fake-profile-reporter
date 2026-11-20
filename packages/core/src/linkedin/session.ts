@@ -74,5 +74,9 @@ export function createSession(opts: SessionOptions = {}): LinkedInSession {
   };
 }
 
-/** Accept either a ready session or the options to make one. */
-export const sessionFrom = (o: { session?: LinkedInSession } & SessionOptions = {}) => o.session ?? createSession(o);
+/** What every reader accepts: a ready session, or the options to make one. */
+export interface ReaderOptions extends SessionOptions {
+  session?: LinkedInSession;
+}
+
+export const sessionFrom = (o: ReaderOptions = {}) => o.session ?? createSession(o);

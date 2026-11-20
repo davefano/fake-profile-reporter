@@ -1,30 +1,6 @@
 -- D1 schema for Fake LinkedIn Reporter.
 -- Apply with: wrangler d1 execute flr --remote --file=./schema.sql
 
-CREATE TABLE IF NOT EXISTS profiles (
-  profile_url   TEXT PRIMARY KEY,
-  handle        TEXT,
-  name          TEXT,
-  headline      TEXT,
-  photo_url     TEXT,
-  first_seen    INTEGER NOT NULL,
-  last_reported INTEGER NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS reports (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  profile_url   TEXT NOT NULL,
-  ip_hash       TEXT NOT NULL,
-  score         INTEGER NOT NULL,
-  level         TEXT NOT NULL,
-  reasons_json  TEXT NOT NULL,
-  profile_json  TEXT NOT NULL,
-  created_at    INTEGER NOT NULL,
-  FOREIGN KEY (profile_url) REFERENCES profiles(profile_url)
-);
-
-CREATE INDEX IF NOT EXISTS idx_reports_profile ON reports(profile_url);
-CREATE INDEX IF NOT EXISTS idx_reports_created ON reports(created_at);
 
 -- Accounts keyed by LinkedIn's stable member ID (slugs change; member IDs don't).
 -- Columns are the latest extracted facts; history lives in account_snapshots.
@@ -70,13 +46,26 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
   version_tag   TEXT,
   score         INTEGER NOT NULL,
   facts_json    TEXT NOT NULL,
-  signals_json  TEXT NOT NULL,
+  signals_json  TEXT NOT NULL,        -- the full Score: { signals, missing, ... }
   changes_json  TEXT NOT NULL,        -- diff vs. the previous snapshot
   ip_hash       TEXT NOT NULL,
   FOREIGN KEY (member_id) REFERENCES accounts(member_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_member ON account_snapshots(member_id, captured_at);
+
+-- Reports that an account looks suspicious, one per reporter per day. The
+-- score is the account's score at report time.
+CREATE TABLE IF NOT EXISTS account_reports (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  member_id   INTEGER NOT NULL,
+  score       INTEGER NOT NULL,
+  ip_hash     TEXT NOT NULL,
+  created_at  INTEGER NOT NULL,
+  FOREIGN KEY (member_id) REFERENCES accounts(member_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_reports_member ON account_reports(member_id, created_at);
 
 -- Every slug an account has been seen under.
 CREATE TABLE IF NOT EXISTS account_slugs (
@@ -100,7 +89,7 @@ CREATE TABLE IF NOT EXISTS entities (
   level TEXT NOT NULL,
   score_version INTEGER NOT NULL,
   facts_json TEXT NOT NULL,
-  signals_json TEXT NOT NULL,
+  signals_json TEXT NOT NULL, -- the full Score: { signals, missing, ... }
   first_seen INTEGER NOT NULL,
   last_seen INTEGER NOT NULL,
   observation_count INTEGER NOT NULL DEFAULT 0,

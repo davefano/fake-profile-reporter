@@ -62,6 +62,6 @@ suggest suspicion; they never declare that someone is fake.
   `--signed-in` for the signed-in extras)
 - Logged-in research browser: agent-browser session `linkedin`; see
   [docs/research-browser.md](docs/research-browser.md)
-- Subagents and `/council`: [docs/agent-models.md](docs/agent-models.md) (§ Council)
+- Subagents, Codex, `/council`: [docs/dev/agent-models.md](docs/dev/agent-models.md) (§ Council); its § pstack roles table overrides the machine pstack config
 - Solved problems: `docs/solutions/` (documented fixes and patterns, by category, with YAML frontmatter: module, tags, problem_type); relevant when working in a documented area
 - An agent mistake: one line in [docs/agent-garden.md](docs/agent-garden.md); a repeat becomes a check

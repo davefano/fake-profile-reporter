@@ -21,7 +21,9 @@ export interface CompanyFacts {
   followers: number | null;
   website: string | null;
   specialties: string[];
-  logo: { present: boolean; uploadedAt: number | null; url: string | null };
+  logo: { present: boolean; uploadedAt: number | null };
+  /** Logo image URL for display. Signed and short-lived, so kept out of `logo` and not diffed. */
+  logoUrl: string | null;
   /** Recent page posts visible to logged-out visitors. */
   posts: { count: number; newestAt: number | null };
   /** Logged-in extras, when the viewer was signed in (see extras.ts). */
@@ -80,7 +82,8 @@ export function parseCompanyPage(html: string, slug: string): CompanyFacts {
     followers,
     website: normalizeWebsite(redirect ? safeDecode(redirect) : (about.get('website') ?? null)),
     specialties: (about.get('specialties') ?? '').split(/,\s*(?:and\s+)?/).map((x) => x.trim()).filter(Boolean),
-    logo: { present: !!logoUrl, uploadedAt: mediaUploadedAt(logoUrl), url: logoUrl ? decodeEntities(logoUrl) : null },
+    logo: { present: !!logoUrl, uploadedAt: mediaUploadedAt(logoUrl) },
+    logoUrl: logoUrl ? decodeEntities(logoUrl) : null,
     posts: { count: postTimes.length, newestAt: postTimes[0] ?? null },
   };
 }

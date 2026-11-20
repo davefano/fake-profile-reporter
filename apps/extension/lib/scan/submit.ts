@@ -1,66 +1,30 @@
-// Save a scan to the directory ("Track"), optionally reporting it.
+// Save a scan to the directory ("Track"), optionally reporting it. The server
+// re-scores everything itself. For profiles it re-parses the raw snapshot; for
+// companies and jobs it re-scores the facts we send (it can't fetch LinkedIn
+// pages itself), after checking their shape.
 
-import type { ProfileFacts } from '@flr/core/linkedin';
-import type { ProfileObservation } from '@flr/core';
+import type { EntityRequest, EntityResponse, SnapshotResponse } from '@flr/core';
 import { api } from '@/lib/api';
-import { activeLinkedInTab, linkedin } from '@/lib/linkedin/client';
-import { isError, type ProfileScan, type SubmitResponse } from '@/lib/messages';
-import { cachedScan } from './scan';
+import { isError } from '@/lib/runtime';
+import type { SubmitResponse } from './messages';
+import { cachedScan, cachedSnapshot } from './scan';
 
 export async function submit(key: string, report: boolean): Promise<SubmitResponse> {
-  const cached = await cachedScan(key);
-  if (!cached) return { error: 'no_scan', message: 'Scan this page again first.' };
-  if (cached.kind === 'profile') return submitProfile(cached, report);
+  const scan = await cachedScan(key);
+  if (!scan) return { error: 'no_scan', message: 'Scan this page again first.' };
 
-  // Companies and jobs: the server re-scores from the facts; it doesn't trust ours.
-  const body =
-    cached.kind === 'company'
-      ? { kind: 'company', id: String(cached.facts.companyId ?? cached.slug), url: `https://www.linkedin.com/company/${cached.slug}/`, facts: cached.facts, report }
-      : { kind: 'job', id: cached.id, url: `https://www.linkedin.com/jobs/view/${cached.id}/`, facts: cached.facts, company: cached.company?.facts ?? null, report };
-  const res = await api('POST', '/api/entities', body);
-  if (isError(res)) return res;
-  const err = res.data?.error;
-  if (res.status >= 400 && !(err === 'observed_recently' && report)) return { error: String(err ?? `HTTP ${res.status}`) };
-  return { ok: true, reported: report, score: res.data?.score?.score };
-}
-
-async function submitProfile(cached: ProfileScan, report: boolean): Promise<SubmitResponse> {
-  const tab = await activeLinkedInTab();
-  if (tab?.target?.kind !== 'profile' || tab.target.slug !== cached.slug) {
-    return { error: 'tab_changed', message: 'The active tab is showing a different profile now.' };
+  if (scan.kind === 'profile') {
+    const gz = await cachedSnapshot(key);
+    if (!gz) return { error: 'no_snapshot', message: 'Scan this profile again first.' };
+    const bytes = Uint8Array.from(atob(gz), (c) => c.charCodeAt(0));
+    const res = await api<SnapshotResponse>('POST', `/api/snapshots${report ? '?report=1' : ''}`, bytes);
+    return isError(res) ? res : { ok: true, reported: res.reported, score: res.score.score };
   }
-  let bytes: Uint8Array;
-  try {
-    bytes = await linkedin.profileSnapshot(tab.tabId, cached.slug);
-  } catch (e) {
-    return { error: 'snapshot_failed', message: String(e) };
-  }
-  const saved = await api('POST', '/api/snapshots', bytes);
-  if (isError(saved)) return saved;
-  // Saved within the cooldown already (e.g. Track, then Report): that's fine.
-  if (saved.status >= 400 && saved.data?.error !== 'captured_recently') return { error: String(saved.data?.error ?? `HTTP ${saved.status}`) };
 
-  if (report) {
-    const res = await api('POST', '/api/report', { url: `https://www.linkedin.com/in/${cached.slug}/`, profile: observation(cached.facts) });
-    if (isError(res)) return res;
-    if (res.status >= 400) return { error: String(res.data?.error ?? `HTTP ${res.status}`) };
-  }
-  return { ok: true, reported: report, score: saved.data?.score?.score };
-}
-
-/** The leaderboard's older report format, filled from profile facts. */
-function observation(f: ProfileFacts): ProfileObservation {
-  return {
-    name: [f.firstName, f.lastName].filter(Boolean).join(' '),
-    headline: f.headline ?? undefined,
-    about: f.summary ?? undefined,
-    photoUrl: f.photoUrl ?? undefined,
-    hasPhoto: f.photo?.present ?? false,
-    connections: f.connections?.count ?? null,
-    connectionsText: f.connections ? `${f.connections.count}${f.connections.capped ? '+' : ''}` : null,
-    followers: f.followers,
-    endorsements: null,
-    experienceCount: f.positions.length,
-    accountAgeDays: f.joined ? Math.floor((Date.now() - f.joined.at) / 86_400_000) : null,
-  };
+  const body: EntityRequest =
+    scan.kind === 'company'
+      ? { kind: 'company', id: String(scan.facts.companyId ?? scan.slug), facts: scan.facts, report }
+      : { kind: 'job', id: scan.id, facts: scan.facts, company: scan.company?.facts ?? null, report };
+  const res = await api<EntityResponse>('POST', '/api/entities', body);
+  return isError(res) ? res : { ok: true, reported: res.reported, score: res.score.score };
 }

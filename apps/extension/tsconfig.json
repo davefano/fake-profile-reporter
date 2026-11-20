@@ -4,6 +4,9 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "verbatimModuleSyntax": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": [
+      "bun"
+    ]
   }
 }

@@ -16,21 +16,17 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import {
-  fetchCompany,
-  fetchJob,
-  scoreCompany,
-  scoreJob,
-  type CompanyExtras,
-  type CompanyFacts,
-  type JobExtras,
   diffProfileFacts,
   extractProfileFacts,
+  getCompany,
+  getJob,
   linkedInTarget,
   normalizeProfileUrl,
-  scoreProfile,
-  type Score,
+  type CompanyExtras,
+  type JobExtras,
   type RawSnapshot,
-} from '@flr/core';
+} from '@flr/core/linkedin';
+import { scoreCompany, scoreJob, scoreProfile, type Score } from '@flr/core/scam';
 
 const ROOT = join(import.meta.dir, '../..');
 const SNAP_DIR = join(ROOT, '.data/snapshots');
@@ -105,7 +101,13 @@ async function inPage<T>(call: string): Promise<T> {
   const result = out.data?.result ?? out.data;
   return JSON.parse(typeof result === 'string' ? result : JSON.stringify(result));
 }
-const signedIn = flag('--signed-in');
+// Signed-in extras through the browser session, for the core getters.
+const signedIn = flag('--signed-in')
+  ? {
+      company: (slug: string) => inPage<CompanyExtras>(`__flrCompanyExtras(${JSON.stringify(slug)})`),
+      job: (id: string) => inPage<JobExtras>(`__flrJobExtras(${JSON.stringify(id)})`),
+    }
+  : undefined;
 const extrasLine = (label: string, x: object) => console.log(`   ${label}: ${JSON.stringify(x)}`);
 
 function printScore(score: Score, indent = '   ') {
@@ -127,36 +129,27 @@ for (const target of targets) {
   if (publicCount++ > 0) await Bun.sleep(DELAY_MS);
   try {
     if (t.kind === 'company') {
-      const f = await fetchCompany(t.slug, publicOpts);
-      if (signedIn) f.extras = await inPage<CompanyExtras>(`__flrCompanyExtras(${JSON.stringify(t.slug)})`);
-      const c = { facts: f, score: scoreCompany(f) };
+      const { facts: f, errors } = await getCompany(t.slug, { ...publicOpts, signedIn: signedIn?.company });
       console.log(`\n━━ ${f.name}  (company/${f.slug})  id ${f.companyId ?? '?'}`);
       console.log(`   ${[f.industry, f.headquarters].filter(Boolean).join(' · ')}`);
       console.log(`   founded ${f.foundedYear ?? '—'} · claims ${f.claimedSize?.label ?? '—'} · ${f.employeesOnLinkedIn ?? '—'} on LinkedIn · ${f.followers?.toLocaleString('en-US') ?? '—'} followers · ${f.website ?? 'no website'}`);
       if (f.extras) extrasLine('signed-in', f.extras);
-      printScore(c.score);
+      printScore(scoreCompany(f));
+      if (Object.keys(errors).length) console.log(`   errors: ${JSON.stringify(errors)}`);
     } else {
-      const f = await fetchJob(t.id, publicOpts);
-      const errors: Record<string, string> = {};
-      let co: CompanyFacts | null = null;
-      if (f.company.slug) co = await fetchCompany(f.company.slug, publicOpts).catch((e) => ((errors.company = String(e)), null));
-      if (signedIn) {
-        f.extras = await inPage<JobExtras>(`__flrJobExtras(${JSON.stringify(t.id)})`);
-        if (co) co.extras = await inPage<CompanyExtras>(`__flrCompanyExtras(${JSON.stringify(co.slug)})`);
-      }
-      const company = co ? { facts: co, score: scoreCompany(co) } : null;
-      const j = { facts: f, company, errors, score: scoreJob(f, co, company?.score ?? null) };
+      const { job: f, company: co, errors } = await getJob(t.id, { ...publicOpts, signedIn });
+      const companyScore = co ? scoreCompany(co) : null;
       console.log(`\n━━ ${f.title}  (job ${f.jobId})`);
       console.log(`   ${[f.company.name, f.location, f.postedText, f.applicants ? `${f.applicants.count} applicants` : null].filter(Boolean).join(' · ')}`);
       console.log(`   ${[f.employmentType, f.seniority, f.salary?.text, f.apply === 'easy' ? 'Easy Apply' : f.apply === 'offsite' ? 'apply on company site' : null].filter(Boolean).join(' · ')}`);
       if (f.extras) extrasLine('signed-in', f.extras);
-      printScore(j.score);
-      if (j.company) {
-        if (j.company.facts.extras) extrasLine('company signed-in', j.company.facts.extras);
-        console.log(`   company: ${j.company.facts.name} (${j.company.facts.employeesOnLinkedIn ?? '—'} on LinkedIn)`);
-        printScore(j.company.score, '     ');
+      printScore(scoreJob(f, co, companyScore));
+      if (co && companyScore) {
+        if (co.extras) extrasLine('company signed-in', co.extras);
+        console.log(`   company: ${co.name} (${co.employeesOnLinkedIn ?? '—'} on LinkedIn)`);
+        printScore(companyScore, '     ');
       }
-      if (Object.keys(j.errors).length) console.log(`   errors: ${JSON.stringify(j.errors)}`);
+      if (Object.keys(errors).length) console.log(`   errors: ${JSON.stringify(errors)}`);
     }
   } catch (e) {
     console.log(`\n━━ ${target}\n   could not read: ${e instanceof Error ? e.message : e}`);
@@ -165,10 +158,6 @@ for (const target of targets) {
 if (!profileTargets.length) process.exit(0);
 
 // --- profiles: logged-in browser ----------------------------------------------------
-
-const code = pageCode ?? (await bundle());
-// The capture must run on a linkedin.com page (same-origin requests).
-if (!ab(['get', 'url']).includes('www.linkedin.com')) ab(['open', 'https://www.linkedin.com/feed/']);
 
 for (const [n, target] of profileTargets.entries()) {
   const slug = slugOf(target);
@@ -179,9 +168,7 @@ for (const [n, target] of profileTargets.entries()) {
   if (n > 0) await Bun.sleep(DELAY_MS);
 
   const opts = JSON.stringify({ includeActivity: !flag('--no-activity') });
-  const out = JSON.parse(ab(['--json', 'eval', '--stdin'], `${code}\n;__flrCapture(${JSON.stringify(slug)}, ${opts}).then(s => JSON.stringify(s))`));
-  const result = out.data?.result ?? out.data;
-  const snap: RawSnapshot = JSON.parse(typeof result === 'string' ? result : JSON.stringify(result));
+  const snap = await inPage<RawSnapshot>(`__flrCapture(${JSON.stringify(slug)}, ${opts})`);
 
   const facts = extractProfileFacts(snap);
   if (!facts.memberId) {
@@ -212,9 +199,7 @@ for (const [n, target] of profileTargets.entries()) {
       ` · last activity ${fmtDate(facts.activity?.newestAt)}` +
       ` · verified ${facts.about ? (facts.about.verifications.length ? 'yes' : 'no') : '—'}`,
   );
-  console.log(`   SCORE ${score.score} (${score.level})`);
-  for (const s of score.signals) console.log(`     ${s.weight > 0 ? '+' : ''}${s.weight}\t${s.kind === 'discrepancy' ? '! ' : ''}${s.label}`);
-  if (score.missing.length) console.log(`   not checked: ${score.missing.join('; ')}`);
+  printScore(score);
   if (Object.keys(snap.errors).length) console.log(`   errors: ${JSON.stringify(snap.errors)}`);
   if (changes.length) console.log(`   changed since last capture: ${changes.map((c) => c.field).join(', ')}`);
   console.log(`   snapshot ${(gz.length / 1024).toFixed(0)} KB gzipped`);
@@ -222,7 +207,7 @@ for (const [n, target] of profileTargets.entries()) {
   if (postTo) {
     const res = await fetch(`${postTo.replace(/\/$/, '')}/api/snapshots`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'content-encoding': 'gzip' },
+      headers: { 'content-type': 'application/json' },
       body: gz,
     });
     console.log(`   posted → ${res.status} ${(await res.text()).slice(0, 200)}`);

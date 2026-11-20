@@ -20,8 +20,11 @@ export interface RawSnapshot {
     activity?: string;
     /** Count phrases found in the profile page HTML, e.g. ["500+ connections"]. */
     profilePageCounts?: string[];
-    /** The "… mutual connections" line from the profile page, relative to the viewer. */
-    profilePageMutual?: string | null;
+    /**
+     * Connections the viewer shares with the profile. Only the count is kept:
+     * the page's text names the viewer's contacts, which must not leave the tab.
+     */
+    profilePageMutualCount?: number | null;
   };
   /** Per-payload fetch failures, keyed like `payloads`. */
   errors: Record<string, string>;

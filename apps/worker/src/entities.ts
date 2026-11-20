@@ -7,14 +7,15 @@
 // shape, recompute the score ourselves, and rate-limit per IP.
 
 import { Hono } from 'hono';
-import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type JobExtras, type JobFacts } from '@flr/core';
+import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type EntityRecord, type EntityResponse, type JobExtras, type JobFacts, type Score } from '@flr/core';
 import type { Env } from './env';
-import { clientIp, hashIp } from './ip';
+import { safeJson } from './json';
+import { reporterLimits } from './limits';
 
 const MAX_BODY = 256 * 1024;
-const OBSERVE_COOLDOWN_MS = 10 * 60 * 1000; // per IP per entity
-const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // per IP per entity
-const DAILY_LIMIT = 200; // per IP, observations and reports together
+const OBSERVE_COOLDOWN_MS = 10 * 60 * 1000; // per reporter per entity
+const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // per reporter per entity
+const DAILY_LIMIT = 200; // per reporter, observations and reports together
 
 export const entities = new Hono<{ Bindings: Env }>();
 
@@ -46,7 +47,8 @@ export function cleanCompany(v: any): CompanyFacts | null {
     followers: num(v.followers),
     website: str(v.website, 300),
     specialties: strs(v.specialties),
-    logo: { present: !!v.logo?.present, uploadedAt: num(v.logo?.uploadedAt), url: null },
+    logo: { present: !!v.logo?.present, uploadedAt: num(v.logo?.uploadedAt) },
+    logoUrl: null,
     posts: { count: num(v.posts?.count) ?? 0, newestAt: num(v.posts?.newestAt) },
     extras: cleanCompanyExtras(v.extras),
   };
@@ -154,18 +156,17 @@ entities.post('/api/entities', async (c) => {
     score = scoreJob(f, company, company ? scoreCompany(company, now) : null);
   }
 
-  const ipHash = await hashIp(clientIp(c.req.raw), c.env.IP_SALT);
-  const kv = c.env.RATE_KV;
   const report = body.report === true;
-  const dayKey = `entday:${ipHash}:${new Date(now).toISOString().slice(0, 10)}`;
-  const count = Number((await kv.get(dayKey)) || 0);
-  if (count >= DAILY_LIMIT) return c.json({ error: 'daily_limit_reached' }, 429);
-
-  const obsKey = `entobs:${kind}:${id}:${ipHash}`;
-  const repKey = `entrep:${kind}:${id}:${ipHash}`;
-  const observedRecently = now - Number((await kv.get(obsKey)) || 0) < OBSERVE_COOLDOWN_MS;
-  if (report && now - Number((await kv.get(repKey)) || 0) < REPORT_COOLDOWN_MS) return c.json({ error: 'already_reported_recently' }, 429);
-  if (!report && observedRecently) return c.json({ error: 'observed_recently' }, 429);
+  const limits = await reporterLimits(c, now);
+  const day = await limits.daily('entities', DAILY_LIMIT);
+  if (!day.ok) return c.json({ error: 'daily_limit_reached' }, 429);
+  const observe = await limits.cooldown(`observe:${kind}:${id}`, OBSERVE_COOLDOWN_MS);
+  const reportCd = report ? await limits.cooldown(`report:${kind}:${id}`, REPORT_COOLDOWN_MS) : null;
+  if (reportCd && !reportCd.ok) return c.json({ error: 'already_reported_recently' }, 429);
+  // Within the observation cooldown a report still counts; only the observation isn't counted again.
+  if (!observe.ok && !report) return c.json({ error: 'observed_recently' }, 429);
+  const ipHash = limits.ipHash;
+  const observedRecently = !observe.ok;
 
   const db = c.env.DB;
   const stmts = [
@@ -178,7 +179,7 @@ entities.post('/api/entities', async (c) => {
            score_version = excluded.score_version, facts_json = excluded.facts_json, signals_json = excluded.signals_json,
            last_seen = excluded.last_seen, observation_count = entities.observation_count + excluded.observation_count`,
       )
-      .bind(kind, id, name, url, score.score, score.level, score.version, JSON.stringify(facts), JSON.stringify(score.signals), now, observedRecently ? 0 : 1),
+      .bind(kind, id, name, url, score.score, score.level, score.version, JSON.stringify(facts), JSON.stringify(score), now, observedRecently ? 0 : 1),
   ];
   if (report) {
     stmts.push(
@@ -188,11 +189,12 @@ entities.post('/api/entities', async (c) => {
   }
   await db.batch(stmts);
 
-  await kv.put(obsKey, String(now), { expirationTtl: OBSERVE_COOLDOWN_MS / 1000 });
-  if (report) await kv.put(repKey, String(now), { expirationTtl: REPORT_COOLDOWN_MS / 1000 });
-  await kv.put(dayKey, String(count + 1), { expirationTtl: 60 * 60 * 48 });
+  await observe.commit();
+  await reportCd?.commit();
+  await day.commit();
 
-  return c.json({ ok: true, kind, id, reported: report, score }, 201);
+  const res: EntityResponse = { ok: true, kind, id, reported: report, score };
+  return c.json(res, 201);
 });
 
 entities.get('/api/entities/:kind/:id', async (c) => {
@@ -201,16 +203,22 @@ entities.get('/api/entities/:kind/:id', async (c) => {
   if (!isKind(kind)) return c.json({ error: 'bad_entity' }, 400);
   const row = await c.env.DB.prepare('SELECT * FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id).first<Record<string, any>>();
   if (!row) return c.json({ error: 'not_found' }, 404);
-  return c.json({
+  const stored = safeJson<Partial<Score> | Score['signals']>(row.signals_json, []);
+  // Older rows stored only the signals array.
+  const score: Score = Array.isArray(stored)
+    ? { score: row.score, level: row.level, version: row.score_version, signals: stored, missing: [] }
+    : { score: row.score, level: row.level, version: row.score_version, signals: stored.signals ?? [], missing: stored.missing ?? [] };
+  const res: EntityRecord = {
     kind,
     id,
     name: row.name,
     url: row.url,
-    score: { score: row.score, level: row.level, version: row.score_version, signals: JSON.parse(row.signals_json) },
-    facts: JSON.parse(row.facts_json),
+    score,
+    facts: safeJson(row.facts_json, {} as EntityRecord['facts']),
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
     observations: row.observation_count,
     reports: row.report_count,
-  });
+  };
+  return c.json(res);
 });

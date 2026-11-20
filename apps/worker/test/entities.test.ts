@@ -23,7 +23,8 @@ const company = (o: Partial<CompanyFacts> = {}): CompanyFacts => ({
   followers: 12,
   website: null,
   specialties: [],
-  logo: { present: false, uploadedAt: null, url: null },
+  logo: { present: false, uploadedAt: null },
+  logoUrl: null,
   posts: { count: 0, newestAt: null },
   ...o,
 });

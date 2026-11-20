@@ -9,7 +9,8 @@ export default defineConfig({
     name: 'Fake LinkedIn Reporter',
     description: 'Checks LinkedIn profiles for signs of fake or scam accounts, in a side panel.',
     permissions: ['storage', 'activeTab', 'scripting'],
-    host_permissions: ['https://www.linkedin.com/*', `${new URL(API_BASE).origin}/*`],
+    // *.linkedin.com: country subdomains (uk.linkedin.com) are read as public pages.
+    host_permissions: ['https://*.linkedin.com/*', `${new URL(API_BASE).origin}/*`],
     action: { default_title: 'Toggle Fake LinkedIn Reporter side panel' },
     // Same toggle from the keyboard. Users can change it at chrome://extensions/shortcuts.
     commands: { _execute_action: { suggested_key: { default: 'Alt+Shift+L' }, description: 'Toggle the side panel' } },

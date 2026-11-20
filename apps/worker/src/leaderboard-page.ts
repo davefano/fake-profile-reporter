@@ -61,7 +61,7 @@ export function leaderboardHtml(): string {
   const board = document.getElementById('board');
   const stats = document.getElementById('stats');
   const fmt = (n) => new Intl.NumberFormat().format(n);
-  const levelOf = (s) => (s >= 60 ? ['high', 'High'] : s >= 30 ? ['med', 'Medium'] : ['low', 'Low']);
+  const LEVEL = { high: ['high', 'High'], medium: ['med', 'Medium'], low: ['low', 'Low'] };
   const ago = (ts) => {
     const d = Math.floor((Date.now() - ts) / 1000);
     if (d < 3600) return Math.floor(d / 60) + 'm ago';
@@ -75,7 +75,7 @@ export function leaderboardHtml(): string {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
       stats.innerHTML = [
-        ['Profiles flagged', fmt(data.stats.profiles)],
+        ['Profiles flagged', fmt(data.stats.accounts)],
         ['Total reports', fmt(data.stats.reports)],
       ].map(([label, val]) => '<div class="stat"><b>' + val + '</b><span>' + label + '</span></div>').join('');
 
@@ -84,40 +84,26 @@ export function leaderboardHtml(): string {
         return;
       }
       board.innerHTML = data.rows.map((r, i) => {
-        const [cls, label] = levelOf(r.avgScore);
-        const initial = esc((r.name || r.handle || '?').slice(0, 1).toUpperCase());
-        const fallback = '<div class="avatar initial">' + initial + '</div>';
-        const avatar = safeHttpUrl(r.photoUrl)
-          ? '<img class="avatar" src="' + esc(r.photoUrl) + '" alt="" loading="lazy" data-initial="' + initial + '"/>'
-          : fallback;
+        const [cls, label] = LEVEL[r.level] || LEVEL.low;
+        const initial = esc((r.name || '?').slice(0, 1).toUpperCase());
+        const avatar = '<div class="avatar initial">' + initial + '</div>';
         return '<div class="row">' +
           '<div class="rank' + (i < 3 ? ' top' : '') + '">#' + (i + 1) + '</div>' +
           '<div class="who">' + avatar +
             '<div style="min-width:0">' +
-              '<div class="name"><a href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' + esc(r.name || r.handle) + '</a></div>' +
+              '<div class="name"><a href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' + esc(r.name) + '</a></div>' +
               '<div class="headline">' + esc(r.headline || '—') + '</div>' +
             '</div>' +
           '</div>' +
           '<div class="scores">' +
-            '<span class="badge ' + cls + '">' + r.avgScore + ' · ' + label + '</span>' +
+            '<span class="badge ' + cls + '">' + r.score + ' · ' + label + '</span>' +
             '<div class="reports">' + r.reports + ' report' + (r.reports === 1 ? '' : 's') + ' · ' + ago(r.lastReported) + '</div>' +
           '</div>' +
         '</div>';
       }).join('');
-      board.querySelectorAll('img.avatar').forEach((img) => {
-        img.addEventListener('error', () => {
-          const d = document.createElement('div');
-          d.className = 'avatar initial';
-          d.textContent = img.dataset.initial || '?';
-          img.replaceWith(d);
-        }, { once: true });
-      });
     } catch (e) {
       board.innerHTML = '<p class="err">Could not load leaderboard: ' + esc(e.message) + '</p>';
     }
-  }
-  function safeHttpUrl(u) {
-    try { return ['http:', 'https:'].includes(new URL(u).protocol); } catch { return false; }
   }
   function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   load();

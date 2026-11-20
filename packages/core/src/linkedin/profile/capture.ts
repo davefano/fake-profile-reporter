@@ -4,11 +4,11 @@
 
 import { activityRequest, aboutRequest, endpoints } from '../endpoints';
 import { profileIdFromUrn } from '../ids';
-import { sessionFrom, type LinkedInSession, type SessionOptions } from '../session';
+import { sessionFrom, type ReaderOptions } from '../session';
+import { parseMutual, resolvedProfile } from './facts';
 import { SNAPSHOT_SCHEMA, type RawSnapshot } from './snapshot';
 
-export interface CaptureOptions extends SessionOptions {
-  session?: LinkedInSession;
+export interface CaptureOptions extends ReaderOptions {
   /** The Activity card is several MB; skip it when you don't need activity. */
   includeActivity?: boolean;
 }
@@ -25,8 +25,7 @@ export async function captureProfile(slug: string, opts: CaptureOptions = {}): P
   };
 
   await attempt('resolve', () => s.voyager(endpoints.resolve(slug)));
-  const resolved = (snap.payloads.resolve as any)?.included?.find((e: any) => e?.entityUrn?.startsWith('urn:li:fsd_profile:'));
-  snap.profileId = profileIdFromUrn(resolved?.entityUrn);
+  snap.profileId = profileIdFromUrn(resolvedProfile(snap.payloads.resolve)?.entityUrn);
 
   await attempt('fullProfile', () => s.voyager(endpoints.fullProfile(slug)));
   await attempt('profilePageCounts', async () => {
@@ -38,7 +37,7 @@ export async function captureProfile(slug: string, opts: CaptureOptions = {}): P
     // Names are wrapped in inline tags (<strong>Lara</strong> and <strong>David</strong> …), so
     // take the whole run of text and inline tags, then strip the tags.
     const run = />((?:[^<]|<\/?(?:strong|span|b|em)\b[^>]*>){0,800}?\bmutual connections?)/.exec(html)?.[1];
-    snap.payloads.profilePageMutual = run ? run.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : null;
+    snap.payloads.profilePageMutualCount = run ? parseMutual(run.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()) : null;
     return [...new Set([...html.matchAll(re)].map((m) => `${m[1] ?? m[3]} ${m[2] ?? m[4]}`))];
   });
 

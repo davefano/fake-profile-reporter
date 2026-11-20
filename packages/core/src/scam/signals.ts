@@ -1,7 +1,7 @@
 // The shape every suspicion score shares: explained signals, a 0–100 total,
 // a level, and the evidence that couldn't be checked.
 
-import type { RiskLevel } from '../types';
+export type RiskLevel = 'low' | 'medium' | 'high';
 
 export const HIGH_THRESHOLD = 60;
 export const MEDIUM_THRESHOLD = 30;

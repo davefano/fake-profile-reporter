@@ -2,6 +2,7 @@
 // columns and fed to the scorer. Every field may be null: LinkedIn changes
 // shape, and any single request can fail.
 
+import { mediaUploadedAt } from '../html';
 import { estimateJoinedAt } from '../join-estimate';
 import { memberIdFromProfileId, memberIdFromUrn, postTimestampMs, profileIdFromUrn } from '../ids';
 import { parseCountText, postIds, rscTexts } from '../rsc';
@@ -92,8 +93,7 @@ function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } | 
   if (pic === undefined) return null;
   const artifacts: any[] = pic?.displayImageReference?.vectorImage?.artifacts ?? [];
   if (!artifacts.length) return { present: false, uploadedAt: null };
-  const ts = String(artifacts[0]?.fileIdentifyingUrlPathSegment ?? '').match(/\/0\/(\d{12,14})(?:\?|$)/);
-  return { present: true, uploadedAt: ts ? Number(ts[1]) : null };
+  return { present: true, uploadedAt: mediaUploadedAt(String(artifacts[0]?.fileIdentifyingUrlPathSegment ?? '')) };
 }
 
 function imageUrl(pic: any): string | null {
@@ -205,8 +205,21 @@ export function parseMutual(text: string | null | undefined): number | null {
   return named + others || null;
 }
 
+/** The profile entity in the slug-resolve payload. */
+export function resolvedProfile(resolve: unknown): { entityUrn: string; versionTag?: string } | undefined {
+  return (resolve as any)?.included?.find((e: any) => e?.entityUrn?.startsWith('urn:li:fsd_profile:'));
+}
+
+/** Companies the member verified with a work email, lowercased ("microsoft"). */
+export function verifiedEmployers(about: ProfileFacts['about']): string[] {
+  return (about?.verifications ?? []).flatMap((v) => {
+    const m = /^(.+?): Verified using work email/i.exec(v);
+    return m ? [m[1]!.toLowerCase()] : [];
+  });
+}
+
 export function extractProfileFacts(snap: RawSnapshot, now = Date.now()): ProfileFacts {
-  const resolved = (snap.payloads.resolve as any)?.included?.find((e: any) => e?.entityUrn?.startsWith('urn:li:fsd_profile:'));
+  const resolved = resolvedProfile(snap.payloads.resolve);
   const wantId = snap.profileId ?? profileIdFromUrn(resolved?.entityUrn);
   const full = snap.payloads.fullProfile ? parseFullProfile(snap.payloads.fullProfile, { profileId: wantId, slug: snap.slug }) : null;
   const about = snap.payloads.about ? parseAbout(snap.payloads.about) : null;
@@ -252,7 +265,7 @@ export function extractProfileFacts(snap: RawSnapshot, now = Date.now()): Profil
     skills: full?.skills ?? [],
     followers: typeof followerState === 'number' ? followerState : (activity?.followers ?? pageFollowers),
     connections,
-    mutualConnections: parseMutual(snap.payloads.profilePageMutual),
+    mutualConnections: snap.payloads.profilePageMutualCount ?? null,
     joined,
     about: about && { contactInfoUpdated: about.contactInfoUpdated, photoUpdated: about.photoUpdated, verifications: about.verifications },
     activity: activity && { postCount: activity.postCount, newestAt: activity.newestAt, oldestAt: activity.oldestAt },

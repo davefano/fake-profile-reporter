@@ -2,7 +2,7 @@
 // verdict: each signal is explained so a person can judge.
 // Positive weights raise suspicion; negative weights are trust signals.
 
-import type { ProfileFacts } from '../linkedin/profile/facts';
+import { verifiedEmployers, type ProfileFacts } from '../linkedin/profile/facts';
 import { finishScore, signalAdder, type Score, type Signal } from './signals';
 import { BUZZ, CRYPTO, GURU, countMatches } from './wordlists';
 
@@ -95,7 +95,7 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   const current = f.positions.find((p) => !p.end && p.companyId && p.company);
   if (current && f.about && ageMs != null && ageMs < 2 * YEAR) {
     const name = current.company!.toLowerCase();
-    if (!verifications.some((v) => v.toLowerCase().startsWith(name))) {
+    if (!verifiedEmployers(f.about).includes(name)) {
       add('pattern.employer-unverified', `Claims to work at ${current.company} without workplace verification`, 8);
     }
   }

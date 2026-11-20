@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { normalizeProfileUrl } from './url';
+import { normalizeProfileUrl } from '../src/linkedin/url';
 
 test.each([
   ['https://www.linkedin.com/in/Jane-Doe/', 'jane-doe', 'Jane-Doe'],

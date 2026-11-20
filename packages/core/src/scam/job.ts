@@ -4,7 +4,7 @@
 
 import type { CompanyFacts } from '../linkedin/company/facts';
 import type { JobFacts } from '../linkedin/job/facts';
-import { siteDomain } from '../linkedin/url';
+import { sameSite, siteDomain } from '../linkedin/url';
 import { FREE_HOSTS } from './company';
 import { finishScore, signalAdder, type Score, type Signal } from './signals';
 
@@ -83,7 +83,7 @@ export function scoreJob(job: JobFacts, company: CompanyFacts | null, companySco
   const otherDomain = job.contacts.emails
     .filter((e) => !PERSONAL_MAIL.test(e))
     .map((e) => e.split('@')[1]!)
-    .find((d) => companyDomain && d !== companyDomain && !d.endsWith(`.${companyDomain}`) && !companyDomain.endsWith(`.${d}`));
+    .find((d) => companyDomain && !sameSite(d, companyDomain));
   if (otherDomain) add('job.email-domain', `Email domain ${otherDomain} doesn't match the company website (${companyDomain})`, 12, 'discrepancy');
   if (job.contacts.phones.length) add('job.phone', 'Lists a phone number to contact directly', 4);
 
@@ -113,14 +113,14 @@ export function scoreJob(job: JobFacts, company: CompanyFacts | null, companySco
   // Logged-in extras.
   const x = job.extras;
   if (!x) {
-    missing.push('Apply link, posting history and verification (sign in to LinkedIn)');
+    missing.push('Apply link, posting history and verification (needs signed-in LinkedIn)');
   } else {
     if (x.verified) add('job.verified', 'LinkedIn marked this as a verified job', -12);
     const applyDomain = siteDomain(x.applyUrl);
     if (applyDomain) {
       if (FORM_OR_SHORTENER.test(applyDomain) || FREE_HOSTS.test(applyDomain)) {
         add('job.apply-form', `Apply link goes to a form, chat, or link shortener (${applyDomain})`, 20, 'discrepancy');
-      } else if (companyDomain && !ATS.test(applyDomain) && applyDomain !== companyDomain && !applyDomain.endsWith(`.${companyDomain}`) && !companyDomain.endsWith(`.${applyDomain}`)) {
+      } else if (companyDomain && !ATS.test(applyDomain) && !sameSite(applyDomain, companyDomain)) {
         add('job.apply-domain', `Apply link goes to ${applyDomain}, not the company's site (${companyDomain})`, 12, 'discrepancy');
       }
     }

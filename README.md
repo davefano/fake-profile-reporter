@@ -16,24 +16,27 @@ packages/core/         shared by everything (TypeScript, no runtime deps); see d
     session.ts         every request: signed in (voyager/RSC/page) or logged out
     endpoints.ts       every URL and query ID
     profile/           capture.ts (raw payloads) → facts.ts (ProfileFacts)
-    company/           facts.ts (public page), extras.ts (signed in), get.ts
-    job/               facts.ts (public posting), extras.ts (signed in), get.ts
-  src/scam/            scoring: profile.ts, company.ts, job.ts, signals.ts; grader.ts (v0)
-  src/types.ts         wire types shared by the extension and API
-tools/capture/         research CLI: capture + score profiles (via agent-browser), companies and jobs (public pages)
+    company/           facts.ts (public page), extras.ts (signed in), get.ts (both)
+    job/               facts.ts (public posting), extras.ts (signed in), get.ts (with its company)
+    diff.ts            what changed between two observations
+  src/scam/            scoring: profile.ts, company.ts, job.ts on top of signals.ts
+  src/wire.ts          API request/response types shared by the extension and the worker
+tools/capture/         research CLI: profiles (via agent-browser), companies and jobs (public pages)
 apps/worker/           the API (Hono on Cloudflare Workers)
-  src/index.ts         routes: report / leaderboard / profile / health
-  src/store.ts         D1 (SQLite) storage
+  src/accounts.ts      profile snapshots, reports, accounts, leaderboard
+  src/entities.ts      company pages and job postings
+  src/limits.ts        per-reporter rate limits (salted IP hash)
   src/leaderboard-page.ts   server-rendered leaderboard page
   schema.sql           database schema
   test/                API tests (real schema on bun:sqlite)
 apps/extension/        the browser extension (WXT)
-  entrypoints/content.ts      scrapes the profile DOM (+ best-effort voyager API)
-  entrypoints/background.ts   orchestrates extraction, proxies API calls
+  entrypoints/content.ts      serves the LinkedIn bridge in the user's LinkedIn tab
+  entrypoints/background.ts   toolbar toggle + routing for the scam check
   entrypoints/sidepanel/      Chrome side panel / Firefox sidebar
   entrypoints/popup/          Safari popup (Safari has no sidebar API)
+  lib/linkedin/               reusable LinkedIn bridge and client (no feature logic)
+  lib/scan/                   the scam check: scan, history, submit, its messages
   lib/panel/                  the UI, shared by side panel and popup
-  lib/messages.ts             typed messaging between extension parts
 ```
 
 ## Setup
@@ -78,22 +81,26 @@ WXT_API_BASE=https://your-worker.workers.dev bun run build:ext
 
 | Method | Path                | Purpose                                    |
 |--------|---------------------|--------------------------------------------|
-| POST   | `/api/report`       | Submit a report `{ url, profile }`         |
-| GET    | `/api/leaderboard`  | Ranked list `?limit=100`                   |
-| GET    | `/api/profile?url=` | One profile + its recent reports           |
-| GET    | `/api/health`       | Health check                               |
-| POST   | `/api/snapshots`    | Store a raw profile snapshot (JSON or gzip) → R2 + D1, returns score and changes |
-| GET    | `/api/accounts/:memberId` | Latest facts, slug history, snapshot history |
+| POST   | `/api/snapshots[?report=1]` | Store a raw profile snapshot (JSON or gzip) → R2 + D1; returns the score and changes. With `report=1`, also reports the account |
+| GET    | `/api/accounts/:memberId` | Latest facts, slug history, snapshot history, report count |
 | GET    | `/api/accounts?slug=` | Same, by any slug the account has used   |
-| POST   | `/api/entities`     | Save a company or job `{ kind, id, url, facts, company?, report }`; the score is recomputed server-side |
+| GET    | `/api/leaderboard`  | Reported accounts, by reports then score, `?limit=100` |
+| POST   | `/api/entities`     | Save a company or job `{ kind, id, facts, company?, report }`; the score is recomputed server-side |
 | GET    | `/api/entities/:kind/:id` | Latest facts, score, observation and report counts |
+| GET    | `/api/health`       | Health check                               |
+
+Request and response types are in `packages/core/src/wire.ts`.
 
 Accounts are keyed by LinkedIn's **member ID**, which never changes, rather
 than by slug, which users can change. Every snapshot's raw payload is kept in
-R2, so parsers and scoring can be re-run over history.
+R2, so parsers and scoring can be re-run over history. The server re-parses and
+re-scores every snapshot itself, and drops viewer-relative data (mutual
+connections) before storing it. An older snapshot uploaded late is stored but
+never overwrites newer facts.
 
-Reports are deduped per-IP per-profile with a 6h cooldown and capped at 50/day
-per IP. IPs are never stored raw — only `sha256(salt + ip)`.
+Each reporter may save an account once per 10 minutes, report it once per day,
+and make 200 saves or reports per day. IPs are never stored raw, only
+`sha256(salt + ip)`.
 
 ## Capturing and scoring profiles, companies, and jobs (research)
 
@@ -112,21 +119,23 @@ profile it prints the facts, the score with every signal, and any changes since
 the last capture. This uses your own LinkedIn account, so keep it to a handful
 of profiles. See `docs/linkedin-data-sources.md` for what each request returns.
 
-## How grading works
+## How scoring works
 
-`packages/core/src/grader.ts` is a deterministic rules engine (no LLM, no API
-keys). It adds weight for signals like crypto/web3 buzzwords, "guru" language,
-generic buzzphrases, very low connection counts, no photo, zero endorsements,
-no/short About, few experience entries, and new accounts.
+`packages/core/src/scam/` is a deterministic rules engine (no LLM, no API keys).
+Each scorer turns facts into explained signals of three kinds: **doesn't add
+up** (claims that contradict each other, such as a 17-year career on a
+four-month-old account), **weak** (thin or new footprint), and **in their
+favor** (verification, age, an established network). Missing evidence is listed
+as "not checked" and never adds suspicion.
 
-Score 0–100 → **low** (<30) / **medium** (30–59) / **high** (≥60). The same
-function runs in the extension for the live preview and in the API at report
-time.
+Score 0–100 → **low** (<30) / **medium** (30–59) / **high** (≥60). A strong
+contradiction keeps the level at least medium. It is a suspicion score, not a
+verdict: a genuine profile can still be used by an impersonator.
 
-The extension reads the rendered DOM and, when available, LinkedIn's internal
-`voyager` API (connections/followers) using the user's existing session. If that
-fails it falls back to DOM values. LinkedIn markup and the voyager endpoint are
-unofficial and change; selectors in `entrypoints/content.ts` may need updates.
+The data comes from LinkedIn's own internal endpoints (see
+`docs/linkedin-data-sources.md`), read through the user's session in their
+LinkedIn tab, and from LinkedIn's public company and job pages. These endpoints
+are unofficial and change; all of them are in `packages/core/src/linkedin/endpoints.ts`.
 
 ## Deploy the API to Cloudflare
 

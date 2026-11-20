@@ -1,17 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { captureProfile, diffProfileFacts, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
+import { scoreProfile } from '../src/scam';
 import { DAY, fakeSnapshot, postIdAt, profileIdFor } from './fixtures';
-import {
-  captureProfile,
-  diffProfileFacts,
-  estimateJoinedAt,
-  extractProfileFacts,
-  memberIdFromProfileId,
-  parseAbout,
-  parseCountText,
-  postTimestampMs,
-  rscTexts,
-  scoreProfile,
-} from '../src/index';
 
 const NOW = Date.UTC(2026, 10, 17);
 
@@ -98,6 +88,13 @@ test('diffProfileFacts reports slug, headline, and connection changes', () => {
   const b = extractProfileFacts(fakeSnapshot({ slug: 'new-slug', headline: 'CEO', connections: '40 connections' }), NOW);
   expect(diffProfileFacts(a, b).map((c) => c.field).sort()).toEqual(['connections', 'headline', 'slug']);
   expect(diffProfileFacts(a, a)).toEqual([]);
+});
+
+test('diffProfileFacts ignores parts that failed to load', () => {
+  const a = extractProfileFacts(fakeSnapshot({ memberId: 700_000_123 }), NOW);
+  const failed = { ...a, profileLoaded: false, headline: null, positions: [], about: null, connections: null };
+  expect(diffProfileFacts(a, failed)).toEqual([]);
+  expect(diffProfileFacts(failed, a)).toEqual([]);
 });
 
 describe('extractProfileFacts profile selection', () => {

@@ -5,7 +5,7 @@
 import { endpoints } from '../endpoints';
 import { memberIdFromProfileId, profileIdFromUrn } from '../ids';
 import { estimateJoinedAt } from '../join-estimate';
-import { sessionFrom, type LinkedInSession, type SessionOptions } from '../session';
+import { sessionFrom, type ReaderOptions } from '../session';
 
 export interface EmployeeSample {
   /** Total people LinkedIn lists as current employees. */
@@ -80,7 +80,7 @@ function findTotal(node: any, depth = 0): number | null {
   return null;
 }
 
-export async function fetchCompanyExtras(slug: string, opts: { session?: LinkedInSession; now?: number } & SessionOptions = {}): Promise<CompanyExtras> {
+export async function fetchCompanyExtras(slug: string, opts: ReaderOptions & { now?: number } = {}): Promise<CompanyExtras> {
   const s = sessionFrom(opts);
   const { companyId, ...record } = parseCompanyRecord(await s.voyager(endpoints.companyRecord(slug)), slug);
   let employees: EmployeeSample | null = null;

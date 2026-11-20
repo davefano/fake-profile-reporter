@@ -18,16 +18,19 @@ export function sendToTab<M extends MessageMap<M>, K extends keyof M>(tabId: num
   return browser.tabs.sendMessage(tabId, msg);
 }
 
+export type Handlers<M extends MessageMap<M>> = { [K in keyof M]?: (msg: M[K]['req']) => Promise<M[K]['res']> };
+
 /**
- * Register an async handler. Return undefined for messages it doesn't handle,
- * so several handlers can share one context. Uses sendResponse + `return true`,
- * the form every browser supports.
+ * Register handlers for a message map, each checked against its response
+ * type. Messages without a handler are left for other listeners, so several
+ * features can share one context. Uses sendResponse + `return true`, the form
+ * every browser supports.
  */
-export function serve<Req extends { type: string }>(handler: (msg: Req) => Promise<unknown> | undefined) {
-  browser.runtime.onMessage.addListener((msg: Req, _sender, sendResponse) => {
-    const result = handler(msg);
-    if (!result) return false;
-    result.then(sendResponse, (e) => sendResponse({ error: 'handler_failed', message: String(e) }));
+export function serve<M extends MessageMap<M>>(handlers: Handlers<M>) {
+  browser.runtime.onMessage.addListener((msg: { type?: string }, _sender, sendResponse) => {
+    const handle = typeof msg?.type === 'string' ? (handlers as Record<string, ((m: unknown) => Promise<unknown>) | undefined>)[msg.type] : undefined;
+    if (!handle) return false;
+    handle(msg).then(sendResponse, (e) => sendResponse({ error: 'handler_failed', message: String(e) }));
     return true;
   });
 }

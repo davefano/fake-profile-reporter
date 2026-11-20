@@ -2,7 +2,10 @@
 // Handles: absolute/relative, trailing slashes, query strings, /in/<slug>,
 // locale prefixes (/en/in/<slug>), and mobile m./www. hosts.
 
-import type { NormalizedProfileUrl } from '../types';
+export interface NormalizedProfileUrl {
+  url: string;
+  handle: string;
+}
 
 export function normalizeProfileUrl(input: unknown): NormalizedProfileUrl | null {
   if (!input) return null;
@@ -33,4 +36,10 @@ export function siteDomain(url: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/** Same site: equal domains, or one a subdomain of the other. */
+export function sameSite(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a === b || a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 }
