@@ -96,6 +96,7 @@ describe('POST /api/entities', () => {
   });
 
   test('rejects malformed or mismatched submissions', async () => {
+    expect((await post({ kind: 'job', id: '4400000009', facts: job(), company: company({ slug: 'some-other-company' }) })).status).toBe(400);
     expect((await post({ kind: 'person', id: '1', facts: {} })).status).toBe(400);
     expect((await post({ kind: 'company', id: '9999', facts: company() })).status).toBe(400); // id ≠ facts
     expect((await post({ kind: 'job', id: 'abc', facts: job() })).status).toBe(400);

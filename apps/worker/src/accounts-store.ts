@@ -23,7 +23,6 @@ interface SnapshotRow {
   captured_at: number;
   score: number;
   changes_json: string;
-  facts_json: string;
 }
 
 interface LeaderboardDbRow {
@@ -58,12 +57,18 @@ interface SnapshotWrite {
 /** The columns the leaderboard needs, from an account's facts and score. */
 const listing = (f: ProfileFacts, s: Score) => [f.slug, f.firstName, f.lastName, f.headline, s.score, s.level, s.version];
 
+/**
+ * The condition every write after a compare-and-swap carries: true only if
+ * this upload's rev is the stored one, so a lost swap writes nothing.
+ */
+const revGuard = (memberId: number, rev: string | null) =>
+  rev ? { sql: 'EXISTS (SELECT 1 FROM account_current WHERE member_id = ? AND rev = ?)', params: [memberId, rev] } : { sql: '1', params: [] };
+
 export function createAccountStore(db: D1Database) {
   /** Statements recording one snapshot; with `rev`, each runs only if that rev is current. */
   const snapshotStatements = (s: SnapshotWrite, rev: string | null) => {
     const memberId = s.observed.memberId;
-    const guard = rev ? `EXISTS (SELECT 1 FROM account_current WHERE member_id = ${Number(memberId)} AND rev = ?)` : '1';
-    const g = rev ? [rev] : [];
+    const { sql: guard, params: g } = revGuard(memberId, rev);
     return [
       db
         .prepare(
@@ -97,16 +102,9 @@ export function createAccountStore(db: D1Database) {
       return facts ? { facts, capturedAt: row!.captured_at, rev: row!.rev } : null;
     },
 
-    /** Make sure the account row exists, so facts and snapshots can reference it. */
-    async ensureAccount(memberId: number, facts: ProfileFacts, score: Score, capturedAt: number): Promise<void> {
-      await db
-        .prepare(
-          `INSERT OR IGNORE INTO accounts (member_id, slug, first_name, last_name, headline, score, level, score_version,
-             first_captured_at, last_captured_at, snapshot_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-        )
-        .bind(memberId, ...listing(facts, score), capturedAt, capturedAt)
-        .run();
+    /** Whether this archived capture is already on record (keys are content hashes). */
+    async hasSnapshot(r2Key: string): Promise<boolean> {
+      return !!(await db.prepare(`SELECT 1 AS x FROM account_snapshots WHERE r2_key = ?`).bind(r2Key).first());
     },
 
     /**
@@ -118,7 +116,18 @@ export function createAccountStore(db: D1Database) {
     async commitNewest(s: SnapshotWrite, prevRev: string | null, account: { facts: ProfileFacts; score: Score }): Promise<boolean> {
       const memberId = s.observed.memberId;
       const rev = crypto.randomUUID();
+      const guard = revGuard(memberId, rev);
       const results = await db.batch([
+        // A first capture creates the account row in the same transaction (the
+        // facts reference it). Of two first uploads, whichever batch runs first
+        // creates both rows; the other's inserts are no-ops.
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO accounts (member_id, slug, first_name, last_name, headline, score, level, score_version,
+               first_captured_at, last_captured_at, snapshot_count)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+          )
+          .bind(memberId, ...listing(account.facts, account.score), s.capturedAt, s.capturedAt),
         prevRev == null
           ? db
               .prepare(`INSERT INTO account_current (member_id, rev, captured_at, facts_json) VALUES (?, ?, ?, ?) ON CONFLICT(member_id) DO NOTHING`)
@@ -130,12 +139,12 @@ export function createAccountStore(db: D1Database) {
           .prepare(
             `UPDATE accounts SET slug = ?, first_name = ?, last_name = ?, headline = ?, score = ?, level = ?, score_version = ?,
                first_captured_at = MIN(first_captured_at, ?), last_captured_at = MAX(last_captured_at, ?), snapshot_count = snapshot_count + 1
-             WHERE member_id = ? AND EXISTS (SELECT 1 FROM account_current WHERE member_id = ? AND rev = ?)`,
+             WHERE member_id = ? AND ${guard.sql}`,
           )
-          .bind(...listing(account.facts, account.score), s.capturedAt, s.capturedAt, memberId, memberId, rev),
+          .bind(...listing(account.facts, account.score), s.capturedAt, s.capturedAt, memberId, ...guard.params),
         ...snapshotStatements(s, rev),
       ]);
-      return (results[0]?.meta?.changes ?? 0) === 1;
+      return (results[1]?.meta?.changes ?? 0) === 1;
     },
 
     /** Record an older capture (a backfill): stored, but the account doesn't move. */
@@ -187,24 +196,21 @@ export function createAccountStore(db: D1Database) {
     },
 
     async getAccount(memberId: number): Promise<AccountResponse | null> {
-      const a = await db.prepare(`SELECT * FROM accounts WHERE member_id = ?`).bind(memberId).first<AccountRow>();
-      if (!a) return null;
-      const [current, slugs, snapshots, reports] = await Promise.all([
-        db
-          .prepare(`SELECT facts_json FROM account_current WHERE member_id = ?`)
-          .bind(memberId)
-          .first<{ facts_json: string }>()
-          .then((r) => (r ? { facts: safeJson<ProfileFacts | null>(r.facts_json, null) } : null)),
-        db
-          .prepare(`SELECT slug, first_seen, last_seen FROM account_slugs WHERE member_id = ? ORDER BY first_seen`)
-          .bind(memberId)
-          .all<{ slug: string; first_seen: number; last_seen: number }>(),
-        db
-          .prepare(`SELECT id, captured_at, score, changes_json FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`)
-          .bind(memberId)
-          .all<Omit<SnapshotRow, 'facts_json'>>(),
-        db.prepare(`SELECT COUNT(*) AS n FROM account_reports WHERE member_id = ?`).bind(memberId).first<{ n: number }>(),
+      // One batch is one transaction: every part of the answer comes from the same moment.
+      const [accountRows, currentRows, slugRows, snapshotRows, reportRows] = await db.batch([
+        db.prepare(`SELECT * FROM accounts WHERE member_id = ?`).bind(memberId),
+        db.prepare(`SELECT facts_json FROM account_current WHERE member_id = ?`).bind(memberId),
+        db.prepare(`SELECT slug, first_seen, last_seen FROM account_slugs WHERE member_id = ? ORDER BY first_seen`).bind(memberId),
+        db.prepare(`SELECT id, captured_at, score, changes_json FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`).bind(memberId),
+        db.prepare(`SELECT COUNT(*) AS n FROM account_reports WHERE member_id = ?`).bind(memberId),
       ]);
+      const a = accountRows?.results[0] as AccountRow | undefined;
+      if (!a) return null;
+      const currentRow = currentRows?.results[0] as { facts_json: string } | undefined;
+      const current = currentRow ? { facts: safeJson<ProfileFacts | null>(currentRow.facts_json, null) } : null;
+      const slugs = { results: (slugRows?.results ?? []) as Array<{ slug: string; first_seen: number; last_seen: number }> };
+      const snapshots = { results: (snapshotRows?.results ?? []) as SnapshotRow[] };
+      const reports = reportRows?.results[0] as { n: number } | undefined;
       // Everything about the profile from its current facts; the accounts row only adds counts and the score.
       const f = current?.facts ?? null;
       return {

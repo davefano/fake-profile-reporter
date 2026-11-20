@@ -31,12 +31,14 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
   score         INTEGER NOT NULL,
   facts_json    TEXT NOT NULL,
   signals_json  TEXT NOT NULL,        -- the full Score: { signals, missing, ... }
-  changes_json  TEXT NOT NULL,        -- diff vs. the previous snapshot
+  changes_json  TEXT NOT NULL,        -- diff vs. the account's current facts when recorded; [] for backfills
   ip_hash       TEXT NOT NULL,
   FOREIGN KEY (member_id) REFERENCES accounts(member_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_member ON account_snapshots(member_id, captured_at);
+-- Keys are content hashes: the same capture is stored once.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_r2_key ON account_snapshots(r2_key);
 
 -- What each account looks like now: the newest capture, with parts it failed
 -- to load carried forward from earlier ones (see observeProfile). Moves by

@@ -3,6 +3,9 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import type { AccountResponse } from '@flr/core/wire';
 import { extractProfileFacts, scoreProfile } from '@flr/core';
 import { createAccountStore } from '../src/accounts-store';
+import { hashIp } from '../src/ip';
+
+const hashIpFor = (ip: string) => hashIp(ip, 'test');
 import { fakeSnapshot } from '@flr/core/test/fixtures';
 import app from '../src/index';
 import type { Env } from '../src/env';
@@ -165,8 +168,8 @@ describe('account current facts', () => {
     const at = Date.UTC(2026, 10, 1);
     const a = extractProfileFacts(fakeSnapshot({ headline: 'From A' }), at);
     const b = extractProfileFacts(fakeSnapshot({ headline: 'From B' }), at);
-    const write = (f: typeof a) => ({ observed: { ...f, memberId: 700_000_001 }, score: scoreProfile(f, at), changes: [], r2Key: 'k', capturedAt: at, ipHash: 'h' });
-    await store.ensureAccount(700_000_001, a, scoreProfile(a, at), at);
+    let n = 0;
+    const write = (f: typeof a) => ({ observed: { ...f, memberId: 700_000_001 }, score: scoreProfile(f, at), changes: [], r2Key: `k${n++}`, capturedAt: at, ipHash: 'h' });
 
     // Both read "no current facts yet"; only the first commit lands.
     expect(await store.commitNewest(write(a), null, { facts: a, score: scoreProfile(a, at) })).toBe(true);
@@ -182,6 +185,20 @@ describe('account current facts', () => {
     expect(got.snapshots).toHaveLength(2);
     const listed = await env.DB.prepare('SELECT headline FROM accounts WHERE member_id = 700000001').first<{ headline: string }>();
     expect(listed?.headline).toBe('From B');
+  });
+
+  test('the same capture uploaded twice is stored once, and a report on it still counts', async () => {
+    const snap = fakeSnapshot({ capturedAt: Date.UTC(2026, 10, 1) });
+    expect((await post(snap)).status).toBe(201);
+    // Past the snapshot cooldown: same reporter, same capture, now reported.
+    await env.RATE_KV.put(`cd:snapshot:700000001:${await hashIpFor('1.1.1.1')}`, '0');
+    const res = (await (await post(snap, { report: true })).json()) as any;
+    expect(res.reported).toBe(true);
+    const got = await account(700_000_001);
+    expect(got.snapshotCount).toBe(1);
+    expect(got.snapshots).toHaveLength(1);
+    expect(got.reports).toBe(1);
+    expect(env.SNAPSHOTS.objects.size).toBe(1);
   });
 
   test('if archiving fails, nothing in the database changes', async () => {

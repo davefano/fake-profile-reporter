@@ -28,7 +28,10 @@ class Statement {
 
   /** Like D1: meta.changes counts the rows the statement wrote. */
   runSync() {
-    const r = this.db.query(this.sql).run(...this.params);
+    const q = this.db.query(this.sql);
+    // In a batch, D1 returns rows for SELECTs and change counts for writes.
+    if (/^\s*select/i.test(this.sql)) return { results: q.all(...this.params), success: true, meta: { changes: 0 } };
+    const r = q.run(...this.params);
     return { results: [], success: true, meta: { changes: r.changes } };
   }
 

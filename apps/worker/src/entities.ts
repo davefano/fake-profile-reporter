@@ -172,6 +172,10 @@ entities.post('/api/entities', async (c) => {
     const f = cleanJob(body.facts, id);
     if (!f) return c.json({ error: 'bad_facts' }, 400);
     const company = body.company ? cleanCompany(body.company) : null;
+    // A job's company must be the one the posting links to.
+    if (body.company && (!company || !f.company.slug || company.slug.toLowerCase() !== f.company.slug.toLowerCase())) {
+      return c.json({ error: 'bad_facts' }, 400);
+    }
     stored = { job: f, company };
     name = f.title;
     url = `https://www.linkedin.com/jobs/view/${id}/`;

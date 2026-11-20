@@ -26,6 +26,11 @@ export const accounts = new Hono<{ Bindings: Env }>();
 
 const isGzip = (b: Uint8Array) => b[0] === 0x1f && b[1] === 0x8b;
 
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 accounts.post('/api/snapshots', async (c) => {
   if (Number(c.req.header('content-length') || 0) > MAX_BYTES) return c.json({ error: 'too_large' }, 413);
   const body = new Uint8Array(await c.req.arrayBuffer());
@@ -76,25 +81,37 @@ accounts.post('/api/snapshots', async (c) => {
     return c.json(res, 201);
   };
 
-  // A report inside the snapshot cooldown: record it against what's stored.
-  if (!snapCd.ok) {
+  // Answer with what's stored, without storing anything: for a report inside
+  // the snapshot cooldown, or a capture that's already on record.
+  const answerStored = async () => {
     const stored = await store.current(memberId);
-    if (stored) return finish(scoreProfile(stored.facts, stored.capturedAt), []);
+    return stored ? finish(scoreProfile(stored.facts, stored.capturedAt), []) : null;
+  };
+  if (!snapCd.ok) {
+    const res = await answerStored();
+    if (res) return res;
   }
 
   // Store the snapshot. Archive first: if that fails, nothing in D1 has changed.
-  const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${limits.ipHash.slice(0, 8)}.json.gz`;
-  await c.env.SNAPSHOTS.put(r2Key, await gzip(new TextEncoder().encode(JSON.stringify(raw))), {
+  // The key is a hash of the contents, so a capture uploaded twice is stored once.
+  const json = JSON.stringify(raw);
+  const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${await sha256(json)}.json.gz`;
+  if (await store.hasSnapshot(r2Key)) {
+    const res = await answerStored();
+    if (res) return res;
+  }
+  await c.env.SNAPSHOTS.put(r2Key, await gzip(new TextEncoder().encode(json)), {
     httpMetadata: { contentType: 'application/json', contentEncoding: 'gzip' },
     customMetadata: { slug: facts.slug ?? '', schema: String(raw.schema) },
   });
   const observedScore = scoreProfile(facts, capturedAt);
-  await store.ensureAccount(memberId, facts, observedScore, capturedAt);
   const write = { observed: { ...facts, memberId }, score: observedScore, changes: [] as FactChange[], r2Key, capturedAt, ipHash: limits.ipHash };
 
   // Merge with the account's current facts and commit, all or nothing, from the
   // version read here. If another upload moved the account first, merge again.
   for (let attempt = 0; attempt < 3; attempt++) {
+    // A concurrent identical upload may have recorded this capture meanwhile.
+    if (attempt > 0 && (await store.hasSnapshot(r2Key))) return (await answerStored()) ?? c.json({ error: 'busy' }, 409);
     const prev = await store.current(memberId);
     if (prev && prev.capturedAt > capturedAt) {
       // An older capture (a backfill): stored, but it doesn't move the account.
