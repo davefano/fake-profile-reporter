@@ -10,9 +10,9 @@
 // score is never trusted.
 
 import { Hono, type Context } from 'hono';
-import { extractProfileFacts, observeProfile, scoreProfile, type LeaderboardResponse, type ProfileFacts, type SnapshotResponse } from '@flr/core';
+import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type RawSnapshot, type Score, type SnapshotResponse } from '@flr/core';
 import type { Env } from './env';
-import { createAccountStore } from './accounts-store';
+import { createAccountStore, type CurrentFacts } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';
 import { reporterLimits } from './limits';
 import { cleanSnapshot } from './snapshot';
@@ -33,21 +33,23 @@ accounts.post('/api/snapshots', async (c) => {
   const report = c.req.query('report') === '1';
 
   // Accept plain or gzipped JSON.
-  let raw: unknown;
+  let parsed: unknown;
   try {
     const json = isGzip(body) ? await gunzipLimited(body, MAX_BYTES) : body;
-    raw = JSON.parse(new TextDecoder().decode(json));
+    parsed = JSON.parse(new TextDecoder().decode(json));
   } catch (e) {
     return e instanceof TooLarge ? c.json({ error: 'too_large' }, 413) : c.json({ error: 'bad_json' }, 400);
   }
-  const snap = cleanSnapshot(raw);
+  const snap = cleanSnapshot(parsed);
   if (!snap) return c.json({ error: 'bad_snapshot' }, 400);
 
   const now = Date.now();
+  // Clamp the claimed capture time into [0, now]; the stored snapshot uses the same value.
   const capturedAt = snap.capturedAt != null ? Math.min(snap.capturedAt, now) : now;
+  const raw: RawSnapshot = { ...snap, capturedAt };
   let facts: ProfileFacts;
   try {
-    facts = extractProfileFacts({ ...snap, capturedAt }, capturedAt);
+    facts = extractProfileFacts(raw, capturedAt);
   } catch {
     return c.json({ error: 'bad_snapshot' }, 400); // payload shapes the parsers couldn't read
   }
@@ -59,39 +61,53 @@ accounts.post('/api/snapshots', async (c) => {
   if (!day.ok) return c.json({ error: 'daily_limit_reached' }, 429);
   const reportCd = report ? await limits.cooldown(`report:${memberId}`, REPORT_COOLDOWN_MS) : null;
   if (reportCd && !reportCd.ok) return c.json({ error: 'already_reported_recently' }, 429);
-  // Within the snapshot cooldown a report still counts; only the snapshot is skipped.
   const snapCd = await limits.cooldown(`snapshot:${memberId}`, SNAPSHOT_COOLDOWN_MS);
   if (!snapCd.ok && !report) return c.json({ error: 'captured_recently' }, 429);
 
   const store = createAccountStore(c.env.DB);
-  const prev = await store.current(memberId);
-  // A backfilled (older) snapshot is stored as observed but doesn't move the account.
-  const newest = !prev || prev.capturedAt <= capturedAt;
-  const observed = newest ? observeProfile(prev?.facts ?? null, facts) : { current: facts, changes: [] };
-  // Not storing (a report inside the snapshot cooldown): answer with what's stored.
-  const kept = snapCd.ok || !prev ? null : prev;
-  const score = kept ? scoreProfile(kept.facts, kept.capturedAt) : scoreProfile(observed.current, capturedAt);
-  const changes = kept ? [] : observed.changes;
-  const current = observed.current;
+  const finish = async (score: Score, changes: FactChange[]) => {
+    // Recorded and returned: the directory's score for the account now.
+    if (reportCd) {
+      await store.addReport({ memberId, score: score.score, ipHash: limits.ipHash, createdAt: now });
+      await reportCd.commit();
+    }
+    await day.commit();
+    const res: SnapshotResponse = { ok: true, memberId, slug: facts.slug, score, changes, reported: report };
+    return c.json(res, 201);
+  };
 
-  if (!kept) {
-    const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${limits.ipHash.slice(0, 8)}.json.gz`;
-    // Store what we kept (after removing viewer-relative data), not the upload as sent.
-    await c.env.SNAPSHOTS.put(r2Key, await gzip(new TextEncoder().encode(JSON.stringify(snap))), {
-      httpMetadata: { contentType: 'application/json', contentEncoding: 'gzip' },
-      customMetadata: { slug: facts.slug ?? '', schema: String(snap.schema) },
-    });
-    await store.addSnapshot({ facts: { ...facts, memberId }, current, score, changes, r2Key, capturedAt, ipHash: limits.ipHash });
-    await snapCd.commit();
+  // A report inside the snapshot cooldown: record it against what's stored.
+  if (!snapCd.ok) {
+    const stored = await store.current(memberId);
+    if (stored) return finish(scoreProfile(stored.facts, stored.capturedAt), []);
   }
-  if (reportCd) {
-    await store.addReport({ memberId, score: (await store.currentScore(memberId)) ?? score.score, ipHash: limits.ipHash, createdAt: now });
-    await reportCd.commit();
-  }
-  await day.commit();
 
-  const res: SnapshotResponse = { ok: true, memberId, slug: facts.slug, score, changes, reported: report };
-  return c.json(res, 201);
+  // Store the snapshot. The account's current facts move only from the version
+  // read here; if another upload moved them first, merge again.
+  await store.ensureAccount(memberId, facts, scoreProfile(facts, capturedAt), capturedAt);
+  let account: { facts: ProfileFacts; score: Score; changes: FactChange[] } | null = null;
+  let prev: CurrentFacts | null = null;
+  for (let attempt = 0; ; attempt++) {
+    prev = await store.current(memberId);
+    if (prev && prev.capturedAt > capturedAt) break; // a backfill: stored, but doesn't move the account
+    const { current, changes } = observeProfile(prev?.facts ?? null, facts);
+    if (await store.setCurrent(memberId, prev?.capturedAt ?? null, { facts: current, capturedAt })) {
+      account = { facts: current, score: scoreProfile(current, capturedAt), changes };
+      break;
+    }
+    if (attempt === 2) return c.json({ error: 'busy' }, 409);
+  }
+
+  const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${limits.ipHash.slice(0, 8)}.json.gz`;
+  await c.env.SNAPSHOTS.put(r2Key, await gzip(new TextEncoder().encode(JSON.stringify(raw))), {
+    httpMetadata: { contentType: 'application/json', contentEncoding: 'gzip' },
+    customMetadata: { slug: facts.slug ?? '', schema: String(raw.schema) },
+  });
+  const snapshotScore = account?.score ?? scoreProfile(facts, capturedAt);
+  await store.addSnapshot({ observed: { ...facts, memberId }, account, score: snapshotScore, changes: account?.changes ?? [], r2Key, capturedAt, ipHash: limits.ipHash });
+  await snapCd.commit();
+
+  return finish(account?.score ?? scoreProfile(prev!.facts, prev!.capturedAt), account?.changes ?? []);
 });
 
 accounts.get('/api/leaderboard', async (c) => {

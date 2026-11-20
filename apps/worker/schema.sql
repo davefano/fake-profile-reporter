@@ -3,38 +3,22 @@
 
 
 -- Accounts keyed by LinkedIn's stable member ID (slugs change; member IDs don't).
--- Columns are the latest extracted facts; history lives in account_snapshots.
+-- Only what the leaderboard lists and sorts by; the full current facts are in
+-- account_current, and history in account_snapshots.
 CREATE TABLE IF NOT EXISTS accounts (
   member_id          INTEGER PRIMARY KEY,
-  profile_id         TEXT,
   slug               TEXT,
   first_name         TEXT,
   last_name          TEXT,
   headline           TEXT,
-  country_code       TEXT,
-  geo_name           TEXT,
-  industry           TEXT,
-  joined_at          INTEGER,          -- ms; see joined_source
-  joined_source      TEXT,             -- 'about' (LinkedIn's own) | 'memberId' (estimate)
-  connections        INTEGER,
-  connections_capped INTEGER,          -- 1 when LinkedIn shows "500+"
-  followers          INTEGER,
-  post_count         INTEGER,          -- posts in the recent-activity card
-  last_activity_at   INTEGER,
-  verified           INTEGER,          -- 1 any verification, 0 none, NULL unknown
-  premium            INTEGER,
-  photo_uploaded_at  INTEGER,
-  position_count     INTEGER,
   score              INTEGER NOT NULL,
   level              TEXT NOT NULL,
   score_version      INTEGER NOT NULL,
-  version_tag        TEXT,             -- LinkedIn's profile version; changes on edit
   first_captured_at  INTEGER NOT NULL,
   last_captured_at   INTEGER NOT NULL,
   snapshot_count     INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_accounts_slug ON accounts(slug);
 CREATE INDEX IF NOT EXISTS idx_accounts_score ON accounts(score);
 
 -- One row per captured snapshot. The raw payload is in R2 at r2_key.
@@ -55,8 +39,8 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
 CREATE INDEX IF NOT EXISTS idx_snapshots_member ON account_snapshots(member_id, captured_at);
 
 -- What each account looks like now: the newest capture, with parts it failed
--- to load carried forward from earlier ones (see observeProfile). The accounts
--- columns are copied from this.
+-- to load carried forward from earlier ones (see observeProfile). Moves by
+-- compare-and-swap on captured_at, so concurrent uploads can't lose facts.
 CREATE TABLE IF NOT EXISTS account_current (
   member_id    INTEGER PRIMARY KEY,
   captured_at  INTEGER NOT NULL,

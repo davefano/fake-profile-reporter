@@ -1,7 +1,7 @@
 // Messages for the scam-check feature: the panel asks the background to scan
 // the active tab and to save or report what it found.
 
-import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget } from '@flr/core/linkedin';
+import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget, ProfilePart } from '@flr/core/linkedin';
 import type { Score } from '@flr/core/scam';
 import type { LeaderboardResponse } from '@flr/core/wire';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
@@ -20,6 +20,8 @@ interface History {
 export interface ProfileScan extends Omit<ProfileResult, 'snapshotGzipBase64'>, History {
   kind: 'profile';
   score: Score;
+  /** Parts this read couldn't load, shown from the previous check instead. */
+  carried: ProfilePart[];
 }
 
 export interface CompanyScan extends History {
@@ -44,9 +46,9 @@ export interface JobScan extends History {
 /** What the panel shows for the active tab. */
 export type ScanResult = ProfileScan | CompanyScan | JobScan;
 
-/** Stable key for "the thing this tab shows", to notice navigation. */
-export const targetKey = (t: LinkedInTarget | null) => (t ? `${t.kind}:${t.kind === 'job' ? t.id : t.slug}` : null);
-export const scanKey = (r: ScanResult) => (r.kind === 'job' ? `job:${r.id}` : `${r.kind}:${r.slug}`);
+/** Stable key for "the thing this tab shows", to notice navigation and to cache scans. */
+export const targetKey = (t: LinkedInTarget) => `${t.kind}:${t.kind === 'job' ? t.id : t.slug}`;
+export const scanKey = (r: ScanResult) => targetKey(r.kind === 'job' ? { kind: 'job', id: r.id } : { kind: r.kind, slug: r.slug });
 
 export type ScanResponse = ScanResult | ErrorResponse;
 /** On success, the directory's own score (it can differ from the panel's: see scoreProfile's mutual connections). */

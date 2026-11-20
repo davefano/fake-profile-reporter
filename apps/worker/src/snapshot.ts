@@ -21,7 +21,8 @@ export function cleanSnapshot(v: unknown): UploadedSnapshot | null {
   if (isObject(v.errors)) for (const [k, e] of Object.entries(v.errors)) if (typeof e === 'string') errors[k] = e.slice(0, 200);
   return {
     schema: SNAPSHOT_SCHEMA,
-    capturedAt: typeof v.capturedAt === 'number' && Number.isFinite(v.capturedAt) ? v.capturedAt : null,
+    // A real capture time: 0 or later (the route also caps it at now).
+    capturedAt: typeof v.capturedAt === 'number' && Number.isFinite(v.capturedAt) && v.capturedAt >= 0 ? v.capturedAt : null,
     slug: v.slug.slice(0, 200),
     profileId: typeof v.profileId === 'string' ? v.profileId : null,
     payloads,

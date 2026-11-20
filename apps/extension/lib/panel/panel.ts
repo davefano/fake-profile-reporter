@@ -181,7 +181,8 @@ function followTabs() {
     clearTimeout(timer);
     timer = setTimeout(async () => {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      const key = targetKey(linkedInTarget(tab?.url));
+      const target = linkedInTarget(tab?.url);
+      const key = target ? targetKey(target) : null;
       if (key !== lastKey) {
         lastKey = key;
         scan();
@@ -229,6 +230,7 @@ export async function mountPanel() {
   const surface = location.pathname.includes('popup') ? '' : 'Side Panel · ';
   $('apiBase').textContent = `${surface}${new URL(API_BASE).host}`;
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-  lastKey = targetKey(linkedInTarget(tab?.url));
+  const target = linkedInTarget(tab?.url);
+  lastKey = target ? targetKey(target) : null;
   scan();
 }

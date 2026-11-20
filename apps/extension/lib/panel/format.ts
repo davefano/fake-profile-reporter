@@ -20,7 +20,7 @@ export function monthDay(ms: number) {
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${d.getUTCFullYear() !== new Date().getUTCFullYear() ? `, ${d.getUTCFullYear()}` : ''}`;
 }
 export function ageText(ms: number) {
-  const days = (Date.now() - ms) / 86_400_000;
+  const days = Math.max(0, (Date.now() - ms) / 86_400_000);
   return days < 60 ? `${Math.floor(days)} days old` : days < 730 ? `${Math.floor(days / 30)} months old` : `${Math.floor(days / 365.25)} years old`;
 }
 export function compact(n: number) {

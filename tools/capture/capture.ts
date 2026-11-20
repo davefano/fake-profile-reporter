@@ -23,6 +23,7 @@ import {
   linkedInTarget,
   type CompanyExtras,
   type JobExtras,
+  type ProfileFacts,
   type RawSnapshot,
 } from '@flr/core/linkedin';
 import { scoreCompany, scoreJob, scoreProfile, type Score } from '@flr/core/scam';
@@ -63,14 +64,28 @@ function slugOf(t: string) {
   return target?.kind === 'profile' ? target.slug : null;
 }
 
-function previousSnapshot(memberId: number): RawSnapshot | null {
+/**
+ * The member's current facts from earlier runs: current.json, or else rebuilt
+ * by folding every saved snapshot through observeProfile (the same rule as the
+ * extension and the directory).
+ */
+function currentFacts(memberId: number): ProfileFacts | null {
+  const dir = join(SNAP_DIR, String(memberId));
   try {
-    const dir = join(SNAP_DIR, String(memberId));
-    const last = readdirSync(dir).filter((f) => f.endsWith('.json.gz')).sort().at(-1);
-    return last ? JSON.parse(gunzipSync(readFileSync(join(dir, last))).toString('utf8')) : null;
+    return JSON.parse(readFileSync(join(dir, 'current.json'), 'utf8')) as ProfileFacts;
   } catch {
-    return null;
+    // not saved yet: rebuild below
   }
+  let facts: ProfileFacts | null = null;
+  try {
+    for (const f of readdirSync(dir).filter((x) => x.endsWith('.json.gz')).sort()) {
+      const snap: RawSnapshot = JSON.parse(gunzipSync(readFileSync(join(dir, f))).toString('utf8'));
+      facts = observeProfile(facts, extractProfileFacts(snap, snap.capturedAt)).current;
+    }
+  } catch {
+    // no snapshots yet
+  }
+  return facts;
 }
 
 const fmtDate = (ms: number | null | undefined) => (ms ? new Date(ms).toISOString().slice(0, 10) : '—');
@@ -180,23 +195,26 @@ for (const [n, target] of profileTargets.entries()) {
   const gz = gzipSync(JSON.stringify(snap));
   // Same rule as the extension and the directory: failed parts keep the last
   // capture's values, and the score uses the merged facts.
-  const prev = previousSnapshot(facts.memberId);
-  const { current, changes } = observeProfile(prev ? extractProfileFacts(prev, prev.capturedAt) : null, facts);
-  const score = scoreProfile(current);
+  const { current, changes, carried } = observeProfile(currentFacts(facts.memberId), facts);
+  const score = scoreProfile(current, snap.capturedAt);
   const dir = join(SNAP_DIR, String(facts.memberId));
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, `${new Date(snap.capturedAt).toISOString().replace(/[:.]/g, '-')}.json.gz`), gz, { mode: 0o600 });
+  writeFileSync(join(dir, 'current.json'), JSON.stringify(current), { mode: 0o600 });
 
-  const name = [facts.firstName, facts.lastName].filter(Boolean).join(' ') || slug;
-  console.log(`\n━━ ${name}  (${facts.slug})  member ${facts.memberId ?? '?'}`);
-  console.log(`   ${facts.headline ?? ''}`);
+  // Print what was scored: the merged current facts.
+  const f = current;
+  const name = [f.firstName, f.lastName].filter(Boolean).join(' ') || slug;
+  console.log(`\n━━ ${name}  (${f.slug})  member ${f.memberId ?? '?'}`);
+  console.log(`   ${f.headline ?? ''}`);
   console.log(
-    `   joined ${fmtDate(facts.joined?.at)}${facts.joined?.source === 'memberId' ? ' (est.)' : ''}` +
-      ` · connections ${facts.connections ? facts.connections.count + (facts.connections.capped ? '+' : '') : '—'}` +
-      ` · followers ${facts.followers?.toLocaleString('en-US') ?? '—'}` +
-      ` · last activity ${fmtDate(facts.activity?.newestAt)}` +
-      ` · verified ${facts.about ? (facts.about.verifications.length ? 'yes' : 'no') : '—'}`,
+    `   joined ${fmtDate(f.joined?.at)}${f.joined?.source === 'memberId' ? ' (est.)' : ''}` +
+      ` · connections ${f.connections ? f.connections.count + (f.connections.capped ? '+' : '') : '—'}` +
+      ` · followers ${f.followers?.toLocaleString('en-US') ?? '—'}` +
+      ` · last activity ${fmtDate(f.activity?.newestAt)}` +
+      ` · verified ${f.about ? (f.about.verifications.length ? 'yes' : 'no') : '—'}`,
   );
+  if (carried.length) console.log(`   not read this time, shown from an earlier capture: ${carried.join(', ')}`);
   printScore(score);
   if (Object.keys(snap.errors).length) console.log(`   errors: ${JSON.stringify(snap.errors)}`);
   if (changes.length) console.log(`   changed since last capture: ${changes.map((c) => c.field).join(', ')}`);

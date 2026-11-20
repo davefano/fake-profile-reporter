@@ -112,6 +112,32 @@ test('a failed About read keeps the join date LinkedIn gave, not the member-ID e
   expect(scoreProfile(current, NOW).score).toBe(scoreProfile(good, NOW).score);
 });
 
+test('observeProfile names the parts it carried forward', () => {
+  const good = extractProfileFacts(fakeSnapshot({ memberId: 700_000_123 }), NOW);
+  const snap = fakeSnapshot({ memberId: 700_000_123, connections: null });
+  delete snap.payloads.fullProfile;
+  delete snap.payloads.about;
+  expect(observeProfile(good, extractProfileFacts(snap, NOW)).carried).toEqual(['profile', 'about', 'connections']);
+});
+
+test('an account joined this month never has a negative age', () => {
+  const f = extractProfileFacts(fakeSnapshot({ joinedAt: NOW + 30 * DAY }), NOW); // next month: shown mid-month, after NOW
+  const age = scoreProfile(f, NOW).signals.find((x) => x.id === 'age.new');
+  expect(age?.label).toContain('(0 days)');
+});
+
+test('entities without a URN never stand in for a missing location or industry', () => {
+  const snap = fakeSnapshot();
+  const included = (snap.payloads.fullProfile as any).included as any[];
+  const p = included.find((e) => e.$type?.endsWith('.Profile'));
+  delete p.geoLocation;
+  delete p.industryUrn;
+  included.push({ $type: 'x.Stray', name: 'Stray Industry', defaultLocalizedName: 'Stray Place' });
+  const f = extractProfileFacts(snap, NOW);
+  expect(f.geoName).toBeNull();
+  expect(f.industry).toBeNull();
+});
+
 test('malformed nested payloads parse to empty facts instead of throwing', () => {
   for (const payloads of [
     { resolve: { included: 'x' }, fullProfile: { included: {} } },

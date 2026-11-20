@@ -1,56 +1,29 @@
-// D1 storage for accounts (keyed by member ID): their snapshot history, slug
-// history, and reports.
+// D1 storage for accounts (keyed by member ID): their current facts, snapshot
+// history, slug history, and reports.
 
-import { carryForwardProfile, type AccountResponse, type FactChange, type LeaderboardRow, type ProfileFacts, type RiskLevel, type Score } from '@flr/core';
+import { observeProfile, type AccountResponse, type FactChange, type LeaderboardRow, type ProfileFacts, type RiskLevel, type Score } from '@flr/core';
 import { safeJson } from './json';
 
-export interface AccountRow {
+interface AccountRow {
   member_id: number;
-  profile_id: string | null;
   slug: string | null;
   first_name: string | null;
   last_name: string | null;
   headline: string | null;
-  country_code: string | null;
-  geo_name: string | null;
-  industry: string | null;
-  joined_at: number | null;
-  joined_source: string | null;
-  connections: number | null;
-  connections_capped: number | null;
-  followers: number | null;
-  post_count: number | null;
-  last_activity_at: number | null;
-  verified: number | null;
-  premium: number | null;
-  photo_uploaded_at: number | null;
-  position_count: number | null;
   score: number;
   level: string;
   score_version: number;
-  version_tag: string | null;
   first_captured_at: number;
   last_captured_at: number;
   snapshot_count: number;
 }
 
-export interface SnapshotRow {
+interface SnapshotRow {
   id: number;
   captured_at: number;
   score: number;
   changes_json: string;
-}
-
-export interface NewSnapshot {
-  /** What this capture observed: stored as the snapshot. */
-  facts: ProfileFacts & { memberId: number };
-  /** The account's facts after this capture (failed parts carried forward); only written when this is the newest capture. */
-  current: ProfileFacts;
-  score: Score;
-  changes: FactChange[];
-  r2Key: string;
-  capturedAt: number;
-  ipHash: string;
+  facts_json: string;
 }
 
 interface LeaderboardDbRow {
@@ -65,71 +38,104 @@ interface LeaderboardDbRow {
   last_reported: number;
 }
 
-const bool = (b: boolean | null | undefined) => (b == null ? null : b ? 1 : 0);
+export interface CurrentFacts {
+  facts: ProfileFacts;
+  capturedAt: number;
+}
+
+export interface NewSnapshot {
+  /** What this capture observed: stored as the snapshot. */
+  observed: ProfileFacts & { memberId: number };
+  /** The account after this capture, when it is the newest one; null for a backfill. */
+  account: { facts: ProfileFacts; score: Score } | null;
+  /** The snapshot's own score. */
+  score: Score;
+  changes: FactChange[];
+  r2Key: string;
+  capturedAt: number;
+  ipHash: string;
+}
+
+/** The columns the leaderboard needs, from an account's facts and score. */
+const listing = (f: ProfileFacts, s: Score) => [f.slug, f.firstName, f.lastName, f.headline, s.score, s.level, s.version];
 
 export function createAccountStore(db: D1Database) {
-  return {
-    /** What the account looks like now (see account_current), if it's been seen. */
-    async current(memberId: number): Promise<{ facts: ProfileFacts; capturedAt: number } | null> {
-      const row = await db
-        .prepare(`SELECT facts_json, captured_at FROM account_current WHERE member_id = ?`)
-        .bind(memberId)
-        .first<{ facts_json: string; captured_at: number }>();
+  const store = {
+    /**
+     * What the account looks like now, if it's been seen. Accounts stored
+     * before account_current existed are rebuilt from their snapshots once.
+     */
+    async current(memberId: number): Promise<CurrentFacts | null> {
+      const row = await db.prepare(`SELECT facts_json, captured_at FROM account_current WHERE member_id = ?`).bind(memberId).first<{ facts_json: string; captured_at: number }>();
       const facts = row ? safeJson<ProfileFacts | null>(row.facts_json, null) : null;
-      return facts ? { facts, capturedAt: row!.captured_at } : null;
+      if (facts) return { facts, capturedAt: row!.captured_at };
+
+      const rows = await db
+        .prepare(`SELECT facts_json, captured_at FROM account_snapshots WHERE member_id = ? ORDER BY captured_at, id`)
+        .bind(memberId)
+        .all<{ facts_json: string; captured_at: number }>();
+      let rebuilt = null as CurrentFacts | null;
+      for (const r of rows.results) {
+        const next = safeJson<ProfileFacts | null>(r.facts_json, null);
+        if (next) rebuilt = { facts: observeProfile(rebuilt?.facts ?? null, next).current, capturedAt: r.captured_at };
+      }
+      if (rebuilt) await store.setCurrent(memberId, null, rebuilt);
+      return rebuilt;
+    },
+
+    /** Make sure the account row exists, so facts and snapshots can reference it. */
+    async ensureAccount(memberId: number, facts: ProfileFacts, score: Score, capturedAt: number): Promise<void> {
+      await db
+        .prepare(
+          `INSERT OR IGNORE INTO accounts (member_id, slug, first_name, last_name, headline, score, level, score_version,
+             first_captured_at, last_captured_at, snapshot_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+        )
+        .bind(memberId, ...listing(facts, score), capturedAt, capturedAt)
+        .run();
+    },
+
+    /**
+     * Move the current facts, but only from the version this upload read
+     * (`prevCapturedAt`, or none). False when another upload got there first.
+     */
+    async setCurrent(memberId: number, prevCapturedAt: number | null, next: CurrentFacts): Promise<boolean> {
+      const r =
+        prevCapturedAt == null
+          ? await db
+              .prepare(`INSERT INTO account_current (member_id, captured_at, facts_json) VALUES (?, ?, ?) ON CONFLICT(member_id) DO NOTHING`)
+              .bind(memberId, next.capturedAt, JSON.stringify(next.facts))
+              .run()
+          : await db
+              .prepare(`UPDATE account_current SET captured_at = ?, facts_json = ? WHERE member_id = ? AND captured_at = ?`)
+              .bind(next.capturedAt, JSON.stringify(next.facts), memberId, prevCapturedAt)
+              .run();
+      return (r.meta?.changes ?? 0) === 1;
     },
 
     async addSnapshot(s: NewSnapshot): Promise<void> {
-      const f = s.current;
-      const current = [
-        f.profileId, f.slug, f.firstName, f.lastName, f.headline, f.countryCode, f.geoName, f.industry,
-        f.joined?.at ?? null, f.joined?.source ?? null, f.connections?.count ?? null, f.connections ? bool(f.connections.capped) : null,
-        f.followers, f.activity?.postCount ?? null, f.activity?.newestAt ?? null, f.about ? bool(f.about.verifications.length > 0) : null,
-        bool(f.premium), f.photo?.uploadedAt ?? null, f.positions.length, s.score.score, s.score.level, s.score.version, f.versionTag,
-      ];
-      // Account first: snapshots and slugs reference it (D1 enforces FKs). The
-      // insert only creates the row and keeps counts; the updates then move the
-      // current facts, and only when this is the newest capture, so a late
-      // upload of an older snapshot can't roll the account back. `current` has
-      // failed parts carried forward already, so columns are set directly.
+      const memberId = s.observed.memberId;
       await db.batch([
         db
           .prepare(
-            `INSERT INTO accounts (member_id, profile_id, slug, first_name, last_name, headline, country_code, geo_name,
-               industry, joined_at, joined_source, connections, connections_capped, followers, post_count, last_activity_at,
-               verified, premium, photo_uploaded_at, position_count, score, level, score_version, version_tag,
-               first_captured_at, last_captured_at, snapshot_count)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-             ON CONFLICT(member_id) DO UPDATE SET
-               first_captured_at = MIN(accounts.first_captured_at, excluded.first_captured_at),
-               last_captured_at = MAX(accounts.last_captured_at, excluded.last_captured_at),
-               snapshot_count = accounts.snapshot_count + 1`,
+            `UPDATE accounts SET first_captured_at = MIN(first_captured_at, ?), last_captured_at = MAX(last_captured_at, ?),
+               snapshot_count = snapshot_count + 1 WHERE member_id = ?`,
           )
-          .bind(s.facts.memberId, ...current, s.capturedAt, s.capturedAt),
-        db
-          .prepare(
-            `UPDATE accounts SET
-               profile_id = ?, slug = ?, first_name = ?, last_name = ?, headline = ?, country_code = ?, geo_name = ?,
-               industry = ?, joined_at = ?, joined_source = ?, connections = ?, connections_capped = ?,
-               followers = ?, post_count = ?, last_activity_at = ?, verified = ?,
-               premium = ?, photo_uploaded_at = ?, position_count = ?, score = ?, level = ?, score_version = ?, version_tag = ?
-             WHERE member_id = ? AND last_captured_at = ?`,
-          )
-          .bind(...current, s.facts.memberId, s.capturedAt),
-        db
-          .prepare(
-            `INSERT INTO account_current (member_id, captured_at, facts_json) VALUES (?, ?, ?)
-             ON CONFLICT(member_id) DO UPDATE SET captured_at = excluded.captured_at, facts_json = excluded.facts_json
-             WHERE excluded.captured_at >= account_current.captured_at`,
-          )
-          .bind(s.facts.memberId, s.capturedAt, JSON.stringify(s.current)),
+          .bind(s.capturedAt, s.capturedAt, memberId),
+        ...(s.account
+          ? [
+              db
+                .prepare(`UPDATE accounts SET slug = ?, first_name = ?, last_name = ?, headline = ?, score = ?, level = ?, score_version = ? WHERE member_id = ?`)
+                .bind(...listing(s.account.facts, s.account.score), memberId),
+            ]
+          : []),
         db
           .prepare(
             `INSERT INTO account_snapshots (member_id, captured_at, r2_key, version_tag, score, facts_json, signals_json, changes_json, ip_hash)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .bind(s.facts.memberId, s.capturedAt, s.r2Key, s.facts.versionTag, s.score.score, JSON.stringify(s.facts), JSON.stringify(s.score), JSON.stringify(s.changes), s.ipHash),
-        ...(s.facts.slug
+          .bind(memberId, s.capturedAt, s.r2Key, s.observed.versionTag, s.score.score, JSON.stringify(s.observed), JSON.stringify(s.score), JSON.stringify(s.changes), s.ipHash),
+        ...(s.observed.slug
           ? [
               db
                 .prepare(
@@ -138,22 +144,14 @@ export function createAccountStore(db: D1Database) {
                      first_seen = MIN(account_slugs.first_seen, excluded.first_seen),
                      last_seen = MAX(account_slugs.last_seen, excluded.last_seen)`,
                 )
-                .bind(s.facts.memberId, s.facts.slug.toLowerCase(), s.capturedAt, s.capturedAt),
+                .bind(memberId, s.observed.slug.toLowerCase(), s.capturedAt, s.capturedAt),
             ]
           : []),
       ]);
     },
 
     async addReport(r: { memberId: number; score: number; ipHash: string; createdAt: number }): Promise<void> {
-      await db
-        .prepare(`INSERT INTO account_reports (member_id, score, ip_hash, created_at) VALUES (?, ?, ?, ?)`)
-        .bind(r.memberId, r.score, r.ipHash, r.createdAt)
-        .run();
-    },
-
-    async currentScore(memberId: number): Promise<number | null> {
-      const row = await db.prepare(`SELECT score FROM accounts WHERE member_id = ?`).bind(memberId).first<{ score: number }>();
-      return row?.score ?? null;
+      await db.prepare(`INSERT INTO account_reports (member_id, score, ip_hash, created_at) VALUES (?, ?, ?, ?)`).bind(r.memberId, r.score, r.ipHash, r.createdAt).run();
     },
 
     /** Reported accounts, most reports first, then highest current score. */
@@ -161,19 +159,15 @@ export function createAccountStore(db: D1Database) {
       const [rows, stats] = await Promise.all([
         db
           .prepare(
-            `SELECT a.member_id, a.slug, a.first_name, a.last_name, a.headline, a.score, a.level,
-                    r.reports, r.last_reported
-             FROM (SELECT member_id, COUNT(*) AS reports, MAX(created_at) AS last_reported
-                   FROM account_reports GROUP BY member_id) r
+            `SELECT a.member_id, a.slug, a.first_name, a.last_name, a.headline, a.score, a.level, r.reports, r.last_reported
+             FROM (SELECT member_id, COUNT(*) AS reports, MAX(created_at) AS last_reported FROM account_reports GROUP BY member_id) r
              JOIN accounts a ON a.member_id = r.member_id
              ORDER BY r.reports DESC, a.score DESC, r.last_reported DESC
              LIMIT ?`,
           )
           .bind(limit)
           .all<LeaderboardDbRow>(),
-        db
-          .prepare(`SELECT COUNT(*) AS reports, COUNT(DISTINCT member_id) AS accounts FROM account_reports`)
-          .first<{ reports: number; accounts: number }>(),
+        db.prepare(`SELECT COUNT(*) AS reports, COUNT(DISTINCT member_id) AS accounts FROM account_reports`).first<{ reports: number; accounts: number }>(),
       ]);
       return {
         stats: { reports: Number(stats?.reports ?? 0), accounts: Number(stats?.accounts ?? 0) },
@@ -194,35 +188,33 @@ export function createAccountStore(db: D1Database) {
     async getAccount(memberId: number): Promise<AccountResponse | null> {
       const a = await db.prepare(`SELECT * FROM accounts WHERE member_id = ?`).bind(memberId).first<AccountRow>();
       if (!a) return null;
-      const [slugs, snapshots, reports] = await Promise.all([
+      const [current, slugs, snapshots, reports] = await Promise.all([
+        store.current(memberId),
         db
           .prepare(`SELECT slug, first_seen, last_seen FROM account_slugs WHERE member_id = ? ORDER BY first_seen`)
           .bind(memberId)
           .all<{ slug: string; first_seen: number; last_seen: number }>(),
         db
-          .prepare(
-            `SELECT id, captured_at, score, changes_json FROM account_snapshots
-             WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`,
-          )
+          .prepare(`SELECT id, captured_at, score, changes_json FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`)
           .bind(memberId)
-          .all<SnapshotRow>(),
+          .all<Omit<SnapshotRow, 'facts_json'>>(),
         db.prepare(`SELECT COUNT(*) AS n FROM account_reports WHERE member_id = ?`).bind(memberId).first<{ n: number }>(),
       ]);
-      const flag = (n: number | null) => (n == null ? null : n === 1);
+      const f = current?.facts;
       return {
-        memberId: a.member_id,
-        profileId: a.profile_id,
+        memberId,
+        profileId: f?.profileId ?? null,
         slug: a.slug,
         name: [a.first_name, a.last_name].filter(Boolean).join(' ') || null,
         headline: a.headline,
-        location: a.geo_name,
-        industry: a.industry,
-        joined: a.joined_at != null ? { at: a.joined_at, source: a.joined_source === 'about' ? 'about' : 'memberId' } : null,
-        connections: a.connections != null ? { count: a.connections, capped: a.connections_capped === 1 } : null,
-        followers: a.followers,
-        postCount: a.post_count,
-        lastActivityAt: a.last_activity_at,
-        verified: flag(a.verified),
+        location: f?.geoName ?? null,
+        industry: f?.industry ?? null,
+        joined: f?.joined ?? null,
+        connections: f?.connections ?? null,
+        followers: f?.followers ?? null,
+        postCount: f?.activity?.postCount ?? null,
+        lastActivityAt: f?.activity?.newestAt ?? null,
+        verified: f?.about ? f.about.verifications.length > 0 : null,
         score: a.score,
         level: a.level as RiskLevel,
         scoreVersion: a.score_version,
@@ -236,11 +228,9 @@ export function createAccountStore(db: D1Database) {
     },
 
     async memberIdForSlug(slug: string): Promise<number | null> {
-      const row = await db
-        .prepare(`SELECT member_id FROM account_slugs WHERE slug = ? ORDER BY last_seen DESC LIMIT 1`)
-        .bind(slug.toLowerCase())
-        .first<{ member_id: number }>();
+      const row = await db.prepare(`SELECT member_id FROM account_slugs WHERE slug = ? ORDER BY last_seen DESC LIMIT 1`).bind(slug.toLowerCase()).first<{ member_id: number }>();
       return row?.member_id ?? null;
     },
   };
+  return store;
 }

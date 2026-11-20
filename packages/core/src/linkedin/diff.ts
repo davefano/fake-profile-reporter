@@ -4,7 +4,7 @@
 
 import type { CompanyFacts } from './company/facts';
 import type { JobFacts } from './job/facts';
-import { carryForwardProfile, PROFILE_RECORD_FIELDS, type ProfileFacts } from './profile/facts';
+import { carryForward, PROFILE_RECORD_FIELDS, type ProfileFacts, type ProfilePart } from './profile/facts';
 
 /** A short, stable digest of a job description, so history needn't keep the text (it can be 30 KB). */
 export function compactJobFacts(job: JobFacts): JobFacts {
@@ -49,9 +49,12 @@ export function diffProfileFacts(prev: ProfileFacts, next: ProfileFacts): FactCh
  * parts carried forward from `prev`) and what changed. One rule for every
  * caller, so the extension, the CLI and the directory agree.
  */
-export function observeProfile(prev: ProfileFacts | null, next: ProfileFacts): { current: ProfileFacts; changes: FactChange[] } {
-  const current = carryForwardProfile(prev, next);
-  return { current, changes: prev ? diffProfileFacts(prev, current) : [] };
+export function observeProfile(
+  prev: ProfileFacts | null,
+  next: ProfileFacts,
+): { current: ProfileFacts; changes: FactChange[]; carried: ProfilePart[] } {
+  const { current, carried } = carryForward(prev, next);
+  return { current, changes: prev ? diffProfileFacts(prev, current) : [], carried };
 }
 
 const COMPANY_FIELDS: Array<keyof CompanyFacts & string> = [

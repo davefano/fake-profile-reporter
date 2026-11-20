@@ -32,7 +32,9 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
 
   // Account age. LinkedIn's own "Joined" date is authoritative; the member-ID
   // estimate is rough, so it counts for half.
-  const ageMs = f.joined ? now - f.joined.at : null;
+  // Month-precision join dates sit mid-month, so a brand-new account can read as
+  // slightly in the future: floor at zero.
+  const ageMs = f.joined ? Math.max(0, now - f.joined.at) : null;
   if (f.joined && ageMs != null) {
     const est = f.joined.source === 'memberId';
     const k = est ? 0.5 : 1;

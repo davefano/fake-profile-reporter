@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import type { AccountResponse } from '@flr/core/wire';
+import { extractProfileFacts, scoreProfile } from '@flr/core';
+import { createAccountStore } from '../src/accounts-store';
 import { fakeSnapshot } from '@flr/core/test/fixtures';
 import app from '../src/index';
 import type { Env } from '../src/env';
@@ -154,6 +156,36 @@ describe('POST /api/snapshots', () => {
     expect(data.score.signals.map((x: any) => x.id)).not.toContain('trust.mutual');
     const [, obj] = [...env.SNAPSHOTS.objects][0]!;
     expect(JSON.parse(gunzipSync(obj.body).toString('utf8')).payloads.profilePageMutualCount).toBeUndefined();
+  });
+});
+
+describe('account current facts', () => {
+  test('moving current facts is a compare-and-swap: a stale upload has to merge again', async () => {
+    const store = createAccountStore(env.DB);
+    const facts = extractProfileFacts(fakeSnapshot(), Date.UTC(2026, 10, 1));
+    await store.ensureAccount(700_000_001, facts, scoreProfile(facts), 1);
+    expect(await store.setCurrent(700_000_001, null, { facts, capturedAt: 10 })).toBe(true);
+    expect(await store.setCurrent(700_000_001, null, { facts, capturedAt: 20 })).toBe(false); // someone else created it
+    expect(await store.setCurrent(700_000_001, 5, { facts, capturedAt: 20 })).toBe(false); // read an old version
+    expect(await store.setCurrent(700_000_001, 10, { facts, capturedAt: 20 })).toBe(true);
+  });
+
+  test('accounts stored before current facts existed are rebuilt from their snapshots', async () => {
+    await post(fakeSnapshot({ firstName: 'Alex', headline: 'Engineer', capturedAt: Date.UTC(2026, 9, 1) }));
+    await env.DB.prepare('DELETE FROM account_current').run();
+    const partial = fakeSnapshot({ firstName: 'Alex', capturedAt: Date.UTC(2026, 9, 2) });
+    delete partial.payloads.fullProfile;
+    expect((await post(partial, { ip: '2.2.2.2' })).status).toBe(201);
+    expect(await account(700_000_001)).toMatchObject({ name: 'Alex Sample', headline: 'Engineer', location: 'Springfield, United States' });
+  });
+
+  test('impossible capture times are treated as now, never a 500', async () => {
+    for (const capturedAt of [-1e20, 1e20, 'yesterday']) {
+      const snap: any = fakeSnapshot({ memberId: 700_000_100 + String(capturedAt).length });
+      snap.capturedAt = capturedAt;
+      const res = await post(snap, { ip: `9.9.9.${String(capturedAt).length}` });
+      expect(res.status).toBe(201);
+    }
   });
 });
 

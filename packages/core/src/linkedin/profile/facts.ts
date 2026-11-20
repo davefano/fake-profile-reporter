@@ -114,7 +114,8 @@ function imageUrl(pic: any): string | null {
 function parseFullProfile(json: unknown, want: { profileId: string | null; slug: string }) {
   const included = includedOf(json);
   const ofType = (suffix: string) => included.filter((e) => typeof e.$type === 'string' && e.$type.endsWith(suffix));
-  const byUrn = new Map(included.map((e) => [e.entityUrn, e]));
+  const byUrnMap = new Map(included.filter((e) => typeof e.entityUrn === 'string').map((e) => [e.entityUrn as string, e]));
+  const byUrn = { get: (u: unknown) => (typeof u === 'string' ? byUrnMap.get(u) : undefined) };
   // The payload also carries other people's profiles (recommenders, people
   // also viewed), so pick the one that was asked for.
   const profiles = ofType('.identity.profile.Profile');
@@ -221,20 +222,36 @@ export function parseMutual(text: string | null | undefined): number | null {
  * current. A failed request is not an edit.
  */
 export function carryForwardProfile(prev: ProfileFacts | null, next: ProfileFacts): ProfileFacts {
-  if (!prev) return next;
+  return carryForward(prev, next).current;
+}
+
+/** Parts of a profile a capture can fail to read, by name. */
+export type ProfilePart = 'profile' | 'about' | 'connections' | 'followers' | 'activity';
+
+/** carryForwardProfile, also naming the parts that came from `prev`. */
+export function carryForward(prev: ProfileFacts | null, next: ProfileFacts): { current: ProfileFacts; carried: ProfilePart[] } {
+  if (!prev) return { current: next, carried: [] };
   const out = { ...next };
+  const carried: ProfilePart[] = [];
   if (!next.profileLoaded && prev.profileLoaded) {
     for (const k of PROFILE_RECORD_FIELDS) (out as any)[k] = prev[k];
     out.profileLoaded = true;
+    carried.push('profile');
+  }
+  if (!next.about && prev.about) {
+    out.about = prev.about;
+    carried.push('about');
   }
   // LinkedIn's own join date beats the member-ID estimate a failed About read falls back to.
   if (prev.joined?.source === 'about' && out.joined?.source !== 'about') out.joined = prev.joined;
   else out.joined ??= prev.joined;
-  out.about ??= prev.about;
-  out.connections ??= prev.connections;
-  out.followers ??= prev.followers;
-  out.activity ??= prev.activity;
-  return out;
+  for (const k of ['connections', 'followers', 'activity'] as const) {
+    if (next[k] == null && prev[k] != null) {
+      (out as any)[k] = prev[k];
+      carried.push(k);
+    }
+  }
+  return { current: out, carried };
 }
 
 /** Fields that come from the full profile record (present only when profileLoaded). */

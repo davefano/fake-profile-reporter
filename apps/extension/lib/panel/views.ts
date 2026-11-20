@@ -1,6 +1,6 @@
 // HTML for a scan result. Pure functions of the scan; all text is escaped.
 
-import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts } from '@flr/core/linkedin';
+import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@flr/core/linkedin';
 import type { RiskLevel, Score, Signal } from '@flr/core/scam';
 import type { CompanyScan, JobScan, ProfileScan, ScanResult } from '@/lib/scan/messages';
 import { ago, ageText, compact, esc, monthDay, monthYear } from './format';
@@ -40,6 +40,26 @@ function scoreBlock(s: Score, kind: ScanResult['kind']) {
     </div>
     ${meter(s.score)}
   </section>`;
+}
+
+const PART_LABEL: Record<ProfilePart, string> = {
+  profile: 'experience, education and photo',
+  about: 'join date and verifications',
+  connections: 'connections',
+  followers: 'followers',
+  activity: 'recent activity',
+};
+
+/** What this read couldn't load, and errors from parts that failed. */
+function readNotes(r: ScanResult) {
+  const notes: string[] = [];
+  if (r.kind === 'profile' && r.carried?.length) { // older cached scans have none
+    const when = r.previousCheckAt ? ` (${ago(r.previousCheckAt)})` : '';
+    notes.push(`Couldn't read ${r.carried.map((p) => PART_LABEL[p]).join(', ')} this time; shown from your earlier check${when}.`);
+  }
+  const errors = Object.entries(r.errors ?? {});
+  if (errors.length) notes.push(`Failed to load: ${errors.map(([k, v]) => `${k} (${v})`).join('; ')}`);
+  return notes.length ? `<section class="group missing"><h3>About this read</h3><ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : '';
 }
 
 function signalsBlock(s: Score) {
@@ -91,6 +111,7 @@ function renderProfile(r: ProfileScan): string {
   </dl>
 
   ${signalsBlock(s)}
+  ${readNotes(r)}
   ${renderTimeline(f, s.signals.some((x) => x.id === 'pattern.career-vs-age'))}`;
 }
 
@@ -132,7 +153,8 @@ function renderCompany(r: CompanyScan): string {
   ${r.changes.length ? renderChanges(r.kind, r.changes, r.previousCheckAt) : ''}
   ${scoreBlock(r.score, 'company')}
   ${companyFacts(c)}
-  ${signalsBlock(r.score)}`;
+  ${signalsBlock(r.score)}
+  ${readNotes(r)}`;
 }
 
 function renderJob(r: JobScan): string {
@@ -167,6 +189,7 @@ function renderJob(r: JobScan): string {
   </dl>
 
   ${signalsBlock(r.score)}
+  ${readNotes(r)}
   ${
     x?.hiringTeam.length
       ? `<section class="group"><h3>Hiring team<span class="count">${x.hiringTeam.length}</span></h3><ul class="signals">${x.hiringTeam

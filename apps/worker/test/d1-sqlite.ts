@@ -27,8 +27,9 @@ class Statement {
   }
 
   async run() {
-    this.db.query(this.sql).run(...this.params);
-    return { results: [], success: true, meta: {} };
+    // Like D1: meta.changes counts the rows the statement wrote.
+    const r = this.db.query(this.sql).run(...this.params);
+    return { results: [], success: true, meta: { changes: r.changes } };
   }
 }
 
