@@ -59,3 +59,12 @@ export function parseAgo(text: string | null | undefined, now: number): number |
   const unit = { minute: 6e4, hour: 36e5, day: 864e5, week: 6048e5, month: 2_592_000_000, year: 31_557_600_000 }[m[2]!.toLowerCase() as 'day'];
   return now - Number(m[1]) * unit;
 }
+
+/** decodeURIComponent that returns the input instead of throwing on a malformed escape. */
+export function safeDecode(s: string) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}

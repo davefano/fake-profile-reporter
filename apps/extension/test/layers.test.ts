@@ -2,19 +2,24 @@
 // LinkedIn data layer and the generic runtime, and nothing feature-specific.
 import { expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const DIR = join(import.meta.dir, '../lib/linkedin');
-const ALLOWED = [/^\.\//, /^@flr\/core\/linkedin$/, /^@\/lib\/runtime$/];
+const PACKAGES = [/^@flr\/core\/linkedin$/, /^@\/lib\/runtime$/];
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sourceFiles(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [],
+  );
+}
 
 test('lib/linkedin imports only the LinkedIn layer, the runtime, and itself', () => {
-  const offenders = readdirSync(DIR)
-    .filter((f) => f.endsWith('.ts'))
-    .flatMap((f) =>
-      [...readFileSync(join(DIR, f), 'utf8').matchAll(/(?:^|\n)\s*(?:import|export)[^'"]*?from\s+['"]([^'"]+)['"]/g)]
-        .map((m) => m[1]!)
-        .filter((spec) => !ALLOWED.some((re) => re.test(spec)))
-        .map((spec) => `${f} -> ${spec}`),
-    );
+  const offenders = sourceFiles(DIR).flatMap((f) =>
+    [...readFileSync(f, 'utf8').matchAll(/(?:^|\n)\s*(?:import|export)[^'"]*?from\s+['"]([^'"]+)['"]/g)]
+      .map((m) => m[1]!)
+      // Relative imports must stay inside lib/linkedin; packages must be on the list.
+      .filter((spec) => (spec.startsWith('.') ? !resolve(dirname(f), spec).startsWith(DIR + sep) : !PACKAGES.some((re) => re.test(spec))))
+      .map((spec) => `${relative(DIR, f)} -> ${spec}`),
+  );
   expect(offenders).toEqual([]);
 });

@@ -28,12 +28,12 @@ export function postTimestampMs(id: string | bigint): number {
 }
 
 /** Pull the profile ID out of an `urn:li:fsd_profile:…` URN. */
-export function profileIdFromUrn(urn: string | null | undefined): string | null {
-  return urn?.match(/^urn:li:fsd_profile:([A-Za-z0-9_-]+)$/)?.[1] ?? null;
+export function profileIdFromUrn(urn: unknown): string | null {
+  return typeof urn === 'string' ? (urn.match(/^urn:li:fsd_profile:([A-Za-z0-9_-]+)$/)?.[1] ?? null) : null;
 }
 
 /** Pull the numeric ID out of an `urn:li:member:<n>` URN. */
-export function memberIdFromUrn(urn: string | null | undefined): number | null {
-  const m = urn?.match(/^urn:li:member:(\d+)$/);
+export function memberIdFromUrn(urn: unknown): number | null {
+  const m = typeof urn === 'string' ? urn.match(/^urn:li:member:(\d+)$/) : null;
   return m ? Number(m[1]) : null;
 }

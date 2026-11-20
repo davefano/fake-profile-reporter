@@ -14,7 +14,12 @@ export function linkedInTarget(url: string | null | undefined): LinkedInTarget |
     return null;
   }
   if (!/(^|\.)linkedin\.com$/.test(u.hostname)) return null;
-  const path = decodeURIComponent(u.pathname);
+  let path = u.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // a malformed escape: match on the raw path
+  }
   const job = u.searchParams.get('currentJobId') ?? /^\/jobs\/view\/(?:[^/]*-)?(\d{6,})\/?/.exec(path)?.[1];
   if (job && /^\d+$/.test(job)) return { kind: 'job', id: job };
   // Optional locale prefix: /en/in/<slug>.

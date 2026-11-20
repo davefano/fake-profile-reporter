@@ -1,6 +1,6 @@
 // A company page's facts, parsed from the public (logged-out) page.
 
-import { byClass, decodeEntities, firstText, htmlText, mediaUploadedAt, parseCount } from '../html';
+import { decodeEntities, firstText, htmlText, mediaUploadedAt, parseCount, safeDecode } from '../html';
 import type { CompanyExtras } from './extras';
 
 export interface CompanyFacts {
@@ -86,14 +86,6 @@ export function parseCompanyPage(html: string, slug: string): CompanyFacts {
     logoUrl: logoUrl ? decodeEntities(logoUrl) : null,
     posts: { count: postTimes.length, newestAt: postTimes[0] ?? null },
   };
-}
-
-function safeDecode(s: string) {
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return s;
-  }
 }
 
 function normalizeWebsite(s: string | null): string | null {

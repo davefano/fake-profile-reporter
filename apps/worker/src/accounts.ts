@@ -10,7 +10,7 @@
 // score is never trusted.
 
 import { Hono, type Context } from 'hono';
-import { carryForwardProfile, diffProfileFacts, extractProfileFacts, scoreProfile, type LeaderboardResponse, type SnapshotResponse } from '@flr/core';
+import { extractProfileFacts, observeProfile, scoreProfile, type LeaderboardResponse, type ProfileFacts, type SnapshotResponse } from '@flr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';
@@ -44,8 +44,13 @@ accounts.post('/api/snapshots', async (c) => {
   if (!snap) return c.json({ error: 'bad_snapshot' }, 400);
 
   const now = Date.now();
-  const capturedAt = Number.isFinite(snap.capturedAt) ? Math.min(snap.capturedAt, now) : now;
-  const facts = extractProfileFacts(snap, capturedAt);
+  const capturedAt = snap.capturedAt != null ? Math.min(snap.capturedAt, now) : now;
+  let facts: ProfileFacts;
+  try {
+    facts = extractProfileFacts({ ...snap, capturedAt }, capturedAt);
+  } catch {
+    return c.json({ error: 'bad_snapshot' }, 400); // payload shapes the parsers couldn't read
+  }
   if (!facts.memberId) return c.json({ error: 'no_member_id' }, 422);
   const memberId = facts.memberId;
 
@@ -62,11 +67,14 @@ accounts.post('/api/snapshots', async (c) => {
   const prev = await store.current(memberId);
   // A backfilled (older) snapshot is stored as observed but doesn't move the account.
   const newest = !prev || prev.capturedAt <= capturedAt;
-  const current = newest ? carryForwardProfile(prev?.facts ?? null, facts) : facts;
-  const score = scoreProfile(current, capturedAt);
-  const changes = newest && prev ? diffProfileFacts(prev.facts, current) : [];
+  const observed = newest ? observeProfile(prev?.facts ?? null, facts) : { current: facts, changes: [] };
+  // Not storing (a report inside the snapshot cooldown): answer with what's stored.
+  const kept = snapCd.ok || !prev ? null : prev;
+  const score = kept ? scoreProfile(kept.facts, kept.capturedAt) : scoreProfile(observed.current, capturedAt);
+  const changes = kept ? [] : observed.changes;
+  const current = observed.current;
 
-  if (snapCd.ok || !prev) {
+  if (!kept) {
     const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${limits.ipHash.slice(0, 8)}.json.gz`;
     // Store what we kept (after removing viewer-relative data), not the upload as sent.
     await c.env.SNAPSHOTS.put(r2Key, await gzip(new TextEncoder().encode(JSON.stringify(snap))), {

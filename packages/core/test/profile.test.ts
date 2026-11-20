@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { captureProfile, carryForwardProfile, diffProfileFacts, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
+import { captureProfile, carryForwardProfile, diffProfileFacts, observeProfile, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
 import { scoreProfile } from '../src/scam';
 import { DAY, fakeSnapshot, postIdAt, profileIdFor } from './fixtures';
 
@@ -98,6 +98,29 @@ test('carryForwardProfile keeps the last good values for parts that failed', () 
   // A change made after the failed capture is still reported against the carried baseline.
   const later = { ...good, headline: 'CEO' };
   expect(diffProfileFacts(carried, later).map((c) => c.field)).toEqual(['headline']);
+});
+
+test('a failed About read keeps the join date LinkedIn gave, not the member-ID estimate', () => {
+  const good = extractProfileFacts(fakeSnapshot({ memberId: 700_000_123, joinedAt: Date.UTC(2026, 6, 15) }), NOW);
+  const snap = fakeSnapshot({ memberId: 700_000_123 });
+  delete snap.payloads.about;
+  const failed = extractProfileFacts(snap, NOW);
+  expect(failed.joined?.source).toBe('memberId');
+  const { current, changes } = observeProfile(good, failed);
+  expect(current.joined).toEqual({ at: Date.UTC(2026, 6, 15), source: 'about' });
+  expect(changes).toEqual([]);
+  expect(scoreProfile(current, NOW).score).toBe(scoreProfile(good, NOW).score);
+});
+
+test('malformed nested payloads parse to empty facts instead of throwing', () => {
+  for (const payloads of [
+    { resolve: { included: 'x' }, fullProfile: { included: {} } },
+    { resolve: { included: [{ entityUrn: 123 }] }, fullProfile: { included: [null, 7, { $type: 'x.identity.profile.Profile', entityUrn: 5, firstName: {} }] } },
+  ]) {
+    const f = extractProfileFacts({ schema: 1, capturedAt: NOW, slug: 'x', profileId: null, payloads: payloads as any, errors: {} }, NOW);
+    expect(f.memberId).toBeNull();
+    expect(f.firstName).toBeNull();
+  }
 });
 
 test('diffProfileFacts ignores parts that failed to load', () => {

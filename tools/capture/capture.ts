@@ -16,10 +16,10 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
 import {
-  diffProfileFacts,
   extractProfileFacts,
   getCompany,
   getJob,
+  observeProfile,
   linkedInTarget,
   type CompanyExtras,
   type JobExtras,
@@ -177,11 +177,12 @@ for (const [n, target] of profileTargets.entries()) {
     console.log(`   errors: ${JSON.stringify(snap.errors)}`);
     continue;
   }
-  const score = scoreProfile(facts);
   const gz = gzipSync(JSON.stringify(snap));
-
+  // Same rule as the extension and the directory: failed parts keep the last
+  // capture's values, and the score uses the merged facts.
   const prev = previousSnapshot(facts.memberId);
-  const changes = prev ? diffProfileFacts(extractProfileFacts(prev), facts) : [];
+  const { current, changes } = observeProfile(prev ? extractProfileFacts(prev, prev.capturedAt) : null, facts);
+  const score = scoreProfile(current);
   const dir = join(SNAP_DIR, String(facts.memberId));
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, `${new Date(snap.capturedAt).toISOString().replace(/[:.]/g, '-')}.json.gz`), gz, { mode: 0o600 });

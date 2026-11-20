@@ -114,6 +114,28 @@ describe('POST /api/snapshots', () => {
     expect(got.headline).toBe('CEO');
   });
 
+  test('many partial captures in a row still keep the last good facts', async () => {
+    await post(fakeSnapshot({ firstName: 'Alex', headline: 'Engineer', capturedAt: Date.UTC(2026, 8, 1) }), { ip: '1.1.1.1' });
+    for (let i = 0; i < 12; i++) {
+      const partial = fakeSnapshot({ firstName: 'Alex', capturedAt: Date.UTC(2026, 8, 2 + i) });
+      delete partial.payloads.fullProfile;
+      expect((await post(partial, { ip: `2.2.2.${i}` })).status).toBe(201);
+    }
+    const got = await account(700_000_001);
+    expect(got).toMatchObject({ name: 'Alex Sample', headline: 'Engineer', snapshotCount: 13 });
+  });
+
+  test('malformed nested payloads are a 4xx, never a 500', async () => {
+    for (const payloads of [
+      { resolve: { included: 'x' }, fullProfile: { included: {} } },
+      { fullProfile: { included: [null, 7] } },
+    ]) {
+      const res = await post({ schema: 1, slug: 'x', capturedAt: 1, payloads, errors: {} });
+      expect(res.status).toBeGreaterThanOrEqual(400);
+      expect(res.status).toBeLessThan(500);
+    }
+  });
+
   test('uploads are cleaned: unknown and malformed payloads are dropped, never stored', async () => {
     const snap: any = fakeSnapshot();
     snap.payloads.profilePageMutual = 'Lara and David are mutual connections';
@@ -148,6 +170,15 @@ describe('reports', () => {
     expect(board.stats).toEqual({ reports: 3, accounts: 2 });
     expect(board.rows.map((r: any) => [r.memberId, r.reports])).toEqual([[700_000_002, 2], [700_000_001, 1]]);
     expect(board.rows[0]).toMatchObject({ name: 'Sam Sample', level: 'low', slug: 'jordan-sample-0a1b2c' });
+  });
+
+  test('a report inside the snapshot cooldown answers with the stored score, not the new upload', async () => {
+    const first = (await (await post(fakeSnapshot({ joinedAt: Date.UTC(2012, 0, 15) }))).json()) as any;
+    const fresh = fakeSnapshot({ joinedAt: Date.UTC(2026, 9, 15), headline: 'Recruiter', connections: '2 connections' });
+    const res = (await (await post(fresh, { report: true })).json()) as any;
+    expect(res.reported).toBe(true);
+    expect(res.score.score).toBe(first.score.score);
+    expect((await account(700_000_001)).score).toBe(first.score.score);
   });
 
   test('a report still counts inside the snapshot cooldown, but only once a day', async () => {

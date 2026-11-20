@@ -54,6 +54,16 @@ CREATE TABLE IF NOT EXISTS account_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_member ON account_snapshots(member_id, captured_at);
 
+-- What each account looks like now: the newest capture, with parts it failed
+-- to load carried forward from earlier ones (see observeProfile). The accounts
+-- columns are copied from this.
+CREATE TABLE IF NOT EXISTS account_current (
+  member_id    INTEGER PRIMARY KEY,
+  captured_at  INTEGER NOT NULL,
+  facts_json   TEXT NOT NULL,
+  FOREIGN KEY (member_id) REFERENCES accounts(member_id)
+);
+
 -- Reports that an account looks suspicious, one per reporter per day. The
 -- score is the account's score at report time.
 CREATE TABLE IF NOT EXISTS account_reports (

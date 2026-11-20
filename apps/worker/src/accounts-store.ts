@@ -37,7 +37,6 @@ export interface AccountRow {
 export interface SnapshotRow {
   id: number;
   captured_at: number;
-  version_tag: string | null;
   score: number;
   changes_json: string;
 }
@@ -45,7 +44,7 @@ export interface SnapshotRow {
 export interface NewSnapshot {
   /** What this capture observed: stored as the snapshot. */
   facts: ProfileFacts & { memberId: number };
-  /** The account's facts after this capture (failed parts carried forward): the current columns. */
+  /** The account's facts after this capture (failed parts carried forward); only written when this is the newest capture. */
   current: ProfileFacts;
   score: Score;
   changes: FactChange[];
@@ -70,21 +69,14 @@ const bool = (b: boolean | null | undefined) => (b == null ? null : b ? 1 : 0);
 
 export function createAccountStore(db: D1Database) {
   return {
-    /**
-     * What the account looks like now: the newest snapshots' facts, with parts
-     * a capture failed to load carried forward from earlier ones.
-     */
+    /** What the account looks like now (see account_current), if it's been seen. */
     async current(memberId: number): Promise<{ facts: ProfileFacts; capturedAt: number } | null> {
-      const rows = await db
-        .prepare(`SELECT facts_json, captured_at FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 10`)
+      const row = await db
+        .prepare(`SELECT facts_json, captured_at FROM account_current WHERE member_id = ?`)
         .bind(memberId)
-        .all<{ facts_json: string; captured_at: number }>();
-      let facts: ProfileFacts | null = null;
-      for (const row of rows.results.reverse()) {
-        const next = safeJson<ProfileFacts | null>(row.facts_json, null);
-        if (next) facts = carryForwardProfile(facts, next);
-      }
-      return facts ? { facts, capturedAt: rows.results.at(-1)!.captured_at } : null;
+        .first<{ facts_json: string; captured_at: number }>();
+      const facts = row ? safeJson<ProfileFacts | null>(row.facts_json, null) : null;
+      return facts ? { facts, capturedAt: row!.captured_at } : null;
     },
 
     async addSnapshot(s: NewSnapshot): Promise<void> {
@@ -96,9 +88,10 @@ export function createAccountStore(db: D1Database) {
         bool(f.premium), f.photo?.uploadedAt ?? null, f.positions.length, s.score.score, s.score.level, s.score.version, f.versionTag,
       ];
       // Account first: snapshots and slugs reference it (D1 enforces FKs). The
-      // insert only creates the row and keeps counts; the update then moves the
+      // insert only creates the row and keeps counts; the updates then move the
       // current facts, and only when this is the newest capture, so a late
-      // upload of an older snapshot can't roll the account back.
+      // upload of an older snapshot can't roll the account back. `current` has
+      // failed parts carried forward already, so columns are set directly.
       await db.batch([
         db
           .prepare(
@@ -117,14 +110,19 @@ export function createAccountStore(db: D1Database) {
           .prepare(
             `UPDATE accounts SET
                profile_id = ?, slug = ?, first_name = ?, last_name = ?, headline = ?, country_code = ?, geo_name = ?,
-               industry = ?, joined_at = COALESCE(?, joined_at), joined_source = COALESCE(?, joined_source),
-               connections = COALESCE(?, connections), connections_capped = COALESCE(?, connections_capped),
-               followers = COALESCE(?, followers), post_count = COALESCE(?, post_count),
-               last_activity_at = COALESCE(?, last_activity_at), verified = COALESCE(?, verified),
+               industry = ?, joined_at = ?, joined_source = ?, connections = ?, connections_capped = ?,
+               followers = ?, post_count = ?, last_activity_at = ?, verified = ?,
                premium = ?, photo_uploaded_at = ?, position_count = ?, score = ?, level = ?, score_version = ?, version_tag = ?
              WHERE member_id = ? AND last_captured_at = ?`,
           )
           .bind(...current, s.facts.memberId, s.capturedAt),
+        db
+          .prepare(
+            `INSERT INTO account_current (member_id, captured_at, facts_json) VALUES (?, ?, ?)
+             ON CONFLICT(member_id) DO UPDATE SET captured_at = excluded.captured_at, facts_json = excluded.facts_json
+             WHERE excluded.captured_at >= account_current.captured_at`,
+          )
+          .bind(s.facts.memberId, s.capturedAt, JSON.stringify(s.current)),
         db
           .prepare(
             `INSERT INTO account_snapshots (member_id, captured_at, r2_key, version_tag, score, facts_json, signals_json, changes_json, ip_hash)
@@ -203,7 +201,7 @@ export function createAccountStore(db: D1Database) {
           .all<{ slug: string; first_seen: number; last_seen: number }>(),
         db
           .prepare(
-            `SELECT id, captured_at, version_tag, score, changes_json FROM account_snapshots
+            `SELECT id, captured_at, score, changes_json FROM account_snapshots
              WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`,
           )
           .bind(memberId)

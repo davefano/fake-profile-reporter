@@ -87,7 +87,10 @@ describe('POST /api/entities', () => {
 
   test('a report inside the observation cooldown adds the report without overwriting facts', async () => {
     expect((await post({ kind: 'company', id: '4242', facts: company(), report: false })).status).toBe(201);
-    expect((await post({ kind: 'company', id: '4242', facts: company({ name: 'Changed Name' }), report: true })).status).toBe(201);
+    const stored = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
+    const res = await post({ kind: 'company', id: '4242', facts: company({ name: 'Changed Name', employeesOnLinkedIn: 5000 }), report: true });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as any).score.score).toBe(stored.score.score); // the stored score, not the new facts'
     const got = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
     expect(got).toMatchObject({ name: 'Example Brand Careers', observations: 1, reports: 1 });
   });

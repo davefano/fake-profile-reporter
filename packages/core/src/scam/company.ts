@@ -75,7 +75,9 @@ export function scoreCompany(c: CompanyFacts, now = Date.now()): Score {
     if (x.paid) add('company.paid', 'Pays LinkedIn for services', -4);
     const e = x.employees;
     const visible = e ? e.sampled - e.hidden : 0;
-    if (!e || visible < 5) {
+    if (!e) {
+      missing.push("Employee account ages (the employee search couldn't be read)");
+    } else if (visible < 5) {
       missing.push('Employee account ages (too few visible employees)');
     } else {
       const share = e.newAccounts / visible;

@@ -1,17 +1,10 @@
 // Scan the active tab: read it through the LinkedIn client, score it, and
 // compare with this browser's history of the same profile, company, or job.
 
-import {
-  carryForwardProfile,
-  compactJobFacts,
-  diffCompanyFacts,
-  diffJobFacts,
-  diffProfileFacts,
-  type FactChange,
-  type ProfileFacts,
-} from '@flr/core/linkedin';
+import { compactJobFacts, diffCompanyFacts, diffJobFacts, observeProfile, type FactChange, type ProfileFacts } from '@flr/core/linkedin';
 import { scoreCompany, scoreJob, scoreProfile } from '@flr/core/scam';
 import { activeLinkedInTab, linkedin } from '@/lib/linkedin/client';
+import { CodedError, errorText } from '@/lib/runtime';
 import { targetKey, type ScanResponse, type ScanResult } from './messages';
 
 // A profile read is 6 requests to LinkedIn, a job up to 6. Reuse results for a
@@ -47,17 +40,23 @@ export const cachedScan = (key: string) => scans.get<ScanResult>(key);
 /** The gzipped raw snapshot behind a cached profile scan, if still kept. */
 export const cachedSnapshot = (key: string) => snapshots.get<string>(key);
 
+type Observe<T> = (prev: T | null, next: T) => { current: T; changes: FactChange[] };
+/** Plain comparison: keep the new observation as it is. */
+const by = <T>(diff: (a: T, b: T) => FactChange[]): Observe<T> => (prev, next) => ({ current: next, changes: prev ? diff(prev, next) : [] });
+
 /**
- * Compare with what this browser saw last time, then remember the new
- * observation (`remember` says what to keep). Never fails a scan.
+ * Compare with what this browser saw last time, remember the result, and
+ * return the current facts. Never fails a scan: without storage it just
+ * reports no history.
  */
-async function compare<T>(key: string, facts: T, at: number, diff: (a: T, b: T) => FactChange[], remember: (prev: T | null, next: T) => T = (_, n) => n) {
+async function compare<T>(key: string, facts: T, at: number, observe: Observe<T>) {
   try {
     const prev = await history.get<{ facts: T; checkedAt: number }>(key);
-    await history.set(key, { facts: remember(prev?.facts ?? null, facts), checkedAt: at });
-    return { changes: prev ? diff(prev.facts, facts) : [], previousCheckAt: prev?.checkedAt ?? null, cached: false };
+    const { current, changes } = observe(prev?.facts ?? null, facts);
+    await history.set(key, { facts: current, checkedAt: at });
+    return { current, hist: { changes, previousCheckAt: prev?.checkedAt ?? null, cached: false } };
   } catch {
-    return { changes: [], previousCheckAt: null, cached: false };
+    return { current: facts, hist: { changes: [], previousCheckAt: null, cached: false } };
   }
 }
 
@@ -77,12 +76,12 @@ export async function scan(force: boolean): Promise<ScanResponse> {
   try {
     if (target.kind === 'company') {
       const { facts, errors } = await linkedin.company(target.slug, { tab });
-      const hist = await compare(`company:${facts.companyId ?? facts.slug}`, facts, now, diffCompanyFacts);
+      const { hist } = await compare(`company:${facts.companyId ?? facts.slug}`, facts, now, by(diffCompanyFacts));
       result = { kind: 'company', slug: target.slug, facts, score: scoreCompany(facts, now), capturedAt: now, errors, ...hist };
     } else if (target.kind === 'job') {
       const { job, company, errors } = await linkedin.job(target.id, { tab });
       const companyScore = company ? scoreCompany(company, now) : null;
-      const hist = await compare(`job:${target.id}`, compactJobFacts(job), now, diffJobFacts);
+      const { hist } = await compare(`job:${target.id}`, compactJobFacts(job), now, by(diffJobFacts));
       result = {
         kind: 'job',
         id: target.id,
@@ -97,14 +96,14 @@ export async function scan(force: boolean): Promise<ScanResponse> {
       const { snapshotGzipBase64, ...p } = await linkedin.profile(target.slug, { tab, includeSnapshot: true });
       if (snapshotGzipBase64) await snapshots.set(key, snapshotGzipBase64).catch(() => {});
       // History per member ID, so renamed profiles still match. Parts that
-      // failed to load keep their last good values.
-      const hist = await compare<ProfileFacts>(`acct:${p.facts.memberId}`, p.facts, p.capturedAt, diffProfileFacts, carryForwardProfile);
-      result = { kind: 'profile', ...p, score: scoreProfile(p.facts, p.capturedAt), ...hist };
+      // failed to load keep their last good values, and the score uses those,
+      // the same way the directory does.
+      const { current, hist } = await compare<ProfileFacts>(`acct:${p.facts.memberId}`, p.facts, p.capturedAt, observeProfile);
+      result = { kind: 'profile', ...p, facts: current, score: scoreProfile(current, p.capturedAt), ...hist };
     }
   } catch (e) {
-    const code = (e as { code?: string }).code;
-    const message = e instanceof Error ? e.message : String(e);
-    return { error: code ?? (/not found/i.test(message) ? 'not_found' : 'capture_failed'), message };
+    const message = errorText(e);
+    return { error: e instanceof CodedError ? e.code : /not found/i.test(message) ? 'not_found' : 'capture_failed', message };
   }
   await scans.set(key, result).catch(() => {});
   return result;

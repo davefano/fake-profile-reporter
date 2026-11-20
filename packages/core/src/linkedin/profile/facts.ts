@@ -73,6 +73,15 @@ export interface ProfileFacts {
 
 type Entity = Record<string, any>;
 
+// Payloads may come from an untrusted upload: narrow every value we read.
+const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+const bool = (v: unknown): boolean | null => (typeof v === 'boolean' ? v : null);
+/** The `included` entities of a normalized payload: objects only. */
+function includedOf(json: unknown): Entity[] {
+  const inc = (json as { included?: unknown } | null)?.included;
+  return Array.isArray(inc) ? inc.filter((e): e is Entity => !!e && typeof e === 'object' && !Array.isArray(e)) : [];
+}
+
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 
 /** "May 2013" → ms at mid-month (UTC). */
@@ -89,9 +98,9 @@ function ym(d: any): YearMonth | null {
 }
 
 /** Upload timestamp from a vector image's artifact paths (…/0/1696284332069). */
-function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } | null {
-  if (pic === undefined) return null;
-  const artifacts: any[] = pic?.displayImageReference?.vectorImage?.artifacts ?? [];
+function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } {
+  const raw = pic?.displayImageReference?.vectorImage?.artifacts;
+  const artifacts: any[] = Array.isArray(raw) ? raw : [];
   if (!artifacts.length) return { present: false, uploadedAt: null };
   return { present: true, uploadedAt: mediaUploadedAt(String(artifacts[0]?.fileIdentifyingUrlPathSegment ?? '')) };
 }
@@ -99,11 +108,11 @@ function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } | 
 function imageUrl(pic: any): string | null {
   const v = pic?.displayImageReference?.vectorImage;
   const seg = v?.artifacts?.[0]?.fileIdentifyingUrlPathSegment;
-  return v?.rootUrl && seg ? String(v.rootUrl) + String(seg) : null;
+  return typeof v?.rootUrl === 'string' && typeof seg === 'string' ? v.rootUrl + seg : null;
 }
 
 function parseFullProfile(json: unknown, want: { profileId: string | null; slug: string }) {
-  const included: Entity[] = (json as any)?.included ?? [];
+  const included = includedOf(json);
   const ofType = (suffix: string) => included.filter((e) => typeof e.$type === 'string' && e.$type.endsWith(suffix));
   const byUrn = new Map(included.map((e) => [e.entityUrn, e]));
   // The payload also carries other people's profiles (recommenders, people
@@ -116,43 +125,44 @@ function parseFullProfile(json: unknown, want: { profileId: string | null; slug:
   if (!p) return null;
   const pid = profileIdFromUrn(p.entityUrn);
   // Child URNs embed the owner: urn:li:fsd_profilePosition:(<profileId>,<n>).
-  const own = (e: Entity) => !String(e.entityUrn ?? '').includes('(') || (!!pid && e.entityUrn.includes(`(${pid},`));
+  const own = (e: Entity) => !String(e.entityUrn ?? '').includes('(') || (!!pid && String(e.entityUrn).includes(`(${pid},`));
   const byType = (suffix: string) => ofType(suffix).filter(own);
   const geo = byUrn.get(p.geoLocation?.geoUrn);
   return {
     profileId: profileIdFromUrn(p.entityUrn),
     memberId: memberIdFromUrn(p.objectUrn),
-    slug: p.publicIdentifier ?? null,
-    versionTag: p.versionTag ?? null,
-    firstName: p.firstName ?? null,
-    lastName: p.lastName ?? null,
-    headline: p.headline ?? null,
-    summary: p.summary ?? null,
-    countryCode: p.location?.countryCode ?? null,
-    geoName: geo?.defaultLocalizedName ?? geo?.defaultLocalizedNameWithoutCountryName ?? null,
-    industry: byUrn.get(p.industryUrn)?.name ?? null,
-    premium: p.premium ?? null,
-    creator: p.creator ?? null,
-    influencer: p.influencer ?? null,
-    memorialized: p.memorialized ?? null,
-    photo: imageInfo(p.profilePicture ?? null),
+    slug: str(p.publicIdentifier),
+    versionTag: str(p.versionTag),
+    firstName: str(p.firstName),
+    lastName: str(p.lastName),
+    headline: str(p.headline),
+    summary: str(p.summary),
+    countryCode: str(p.location?.countryCode),
+    geoName: str(geo?.defaultLocalizedName) ?? str(geo?.defaultLocalizedNameWithoutCountryName),
+    industry: str(byUrn.get(p.industryUrn)?.name),
+    premium: bool(p.premium),
+    creator: bool(p.creator),
+    influencer: bool(p.influencer),
+    memorialized: bool(p.memorialized),
+    // A loaded profile without a picture field has no picture.
+    photo: imageInfo(p.profilePicture),
     photoUrl: imageUrl(p.profilePicture),
-    background: imageInfo(p.backgroundPicture ?? null),
+    background: imageInfo(p.backgroundPicture),
     positions: byType('.identity.profile.Position').map((x) => ({
-      title: x.title ?? null,
-      company: x.companyName ?? null,
+      title: str(x.title),
+      company: str(x.companyName),
       companyId: Number(String(x.companyUrn ?? '').match(/fsd_company:(\d+)$/)?.[1]) || null,
       start: ym(x.dateRange?.start),
       end: ym(x.dateRange?.end),
     })),
     educations: byType('.identity.profile.Education').map((x) => ({
-      school: x.schoolName ?? null,
-      degree: x.degreeName ?? null,
-      field: x.fieldOfStudy ?? null,
+      school: str(x.schoolName),
+      degree: str(x.degreeName),
+      field: str(x.fieldOfStudy),
       start: ym(x.dateRange?.start),
       end: ym(x.dateRange?.end),
     })),
-    skills: byType('.identity.profile.Skill').map((x) => x.name).filter(Boolean),
+    skills: byType('.identity.profile.Skill').map((x) => str(x.name)).filter((x): x is string => !!x),
   };
 }
 
@@ -217,6 +227,9 @@ export function carryForwardProfile(prev: ProfileFacts | null, next: ProfileFact
     for (const k of PROFILE_RECORD_FIELDS) (out as any)[k] = prev[k];
     out.profileLoaded = true;
   }
+  // LinkedIn's own join date beats the member-ID estimate a failed About read falls back to.
+  if (prev.joined?.source === 'about' && out.joined?.source !== 'about') out.joined = prev.joined;
+  else out.joined ??= prev.joined;
   out.about ??= prev.about;
   out.connections ??= prev.connections;
   out.followers ??= prev.followers;
@@ -231,8 +244,9 @@ export const PROFILE_RECORD_FIELDS = [
 ] as const satisfies ReadonlyArray<keyof ProfileFacts>;
 
 /** The profile entity in the slug-resolve payload. */
-export function resolvedProfile(resolve: unknown): { entityUrn: string; versionTag?: string } | undefined {
-  return (resolve as any)?.included?.find((e: any) => e?.entityUrn?.startsWith('urn:li:fsd_profile:'));
+export function resolvedProfile(resolve: unknown): { entityUrn: string; versionTag: string | null } | undefined {
+  const e = includedOf(resolve).find((x) => typeof x.entityUrn === 'string' && x.entityUrn.startsWith('urn:li:fsd_profile:'));
+  return e ? { entityUrn: e.entityUrn, versionTag: str(e.versionTag) } : undefined;
 }
 
 /** Companies the member verified with a work email, lowercased ("microsoft"). */

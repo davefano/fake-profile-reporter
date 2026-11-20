@@ -6,7 +6,7 @@
 //   const { facts } = await linkedin.company('example-co', { tab });
 
 import { getCompany, getJob, linkedInTarget, type CompanyResult, type JobWithCompany, type LinkedInTarget } from '@flr/core/linkedin';
-import { isError, sendToTab, type ErrorResponse } from '@/lib/runtime';
+import { CodedError, isError, sendToTab, type ErrorResponse } from '@/lib/runtime';
 import type { LinkedInMessages, ProfileResult } from './protocol';
 
 const PUBLIC = { base: 'https://www.linkedin.com' };
@@ -47,7 +47,7 @@ async function ask<K extends keyof LinkedInMessages>(tabId: number, msg: LinkedI
 
 /** Turn an error answer into a thrown Error carrying its code. */
 function unwrap<T>(r: T | ErrorResponse): T {
-  if (isError(r)) throw Object.assign(new Error(r.message ?? r.error), { code: r.error });
+  if (isError(r)) throw new CodedError(r.error, r.message);
   return r;
 }
 
@@ -62,7 +62,7 @@ function viaTab(tabId: number) {
 export const linkedin = {
   /** A profile's facts, read in a signed-in LinkedIn tab (about 6 requests). Add the raw snapshot with includeSnapshot. */
   async profile(slug: string, opts: { tab: LinkedInTab | null; includeActivity?: boolean; includeSnapshot?: boolean }): Promise<ProfileResult> {
-    if (!opts.tab?.signedInReachable) throw Object.assign(new Error('Open this profile on www.linkedin.com to check it.'), { code: 'capture_failed' });
+    if (!opts.tab?.signedInReachable) throw new CodedError('capture_failed', 'Open this profile on www.linkedin.com to check it.');
     const { includeActivity, includeSnapshot } = opts;
     return unwrap(await ask<'LI_PROFILE'>(opts.tab.tabId, { type: 'LI_PROFILE', slug, includeActivity, includeSnapshot }));
   },

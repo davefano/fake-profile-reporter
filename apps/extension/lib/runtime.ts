@@ -5,6 +5,16 @@ export type ErrorResponse = { error: string; message?: string; tabUrl?: string |
 
 export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+/** An Error carrying an ErrorResponse code across async boundaries. */
+export class CodedError extends Error {
+  constructor(
+    readonly code: string,
+    message?: string,
+  ) {
+    super(message ?? code);
+  }
+}
+
 export function isError(r: unknown): r is ErrorResponse {
   return !!r && typeof r === 'object' && 'error' in r && typeof (r as ErrorResponse).error === 'string';
 }

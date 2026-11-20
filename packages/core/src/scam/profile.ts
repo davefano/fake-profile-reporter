@@ -36,12 +36,13 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   if (f.joined && ageMs != null) {
     const est = f.joined.source === 'memberId';
     const k = est ? 0.5 : 1;
-    const desc = `${fmtAge(ageMs)}${est ? ', estimated from member ID' : ''}`;
-    if (ageMs < 30 * DAY) add('age.new', `Account created very recently (${desc})`, 35 * k);
-    else if (ageMs < 180 * DAY) add('age.recent', `Account is under 6 months old (${desc})`, 22 * k);
-    else if (ageMs < YEAR) add('age.young', `Account is under a year old (${desc})`, 12 * k);
+    const age = fmtAge(ageMs);
+    const how = est ? ', estimated from member ID' : '';
+    if (ageMs < 30 * DAY) add('age.new', `Account created very recently (${age}${how})`, 35 * k);
+    else if (ageMs < 180 * DAY) add('age.recent', `Account is under 6 months old (${age}${how})`, 22 * k);
+    else if (ageMs < YEAR) add('age.young', `Account is under a year old (${age}${how})`, 12 * k);
     // Modest credit: aged accounts are bought and sold for scams.
-    else if (ageMs > 5 * YEAR) add('age.established', `Account is ${desc} old`, -8 * k);
+    else if (ageMs > 5 * YEAR) add('age.established', `Account is ${age} old${est ? ' (estimated from member ID)' : ''}`, -8 * k);
   } else {
     missing.push('Account age');
   }

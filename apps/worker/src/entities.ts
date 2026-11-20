@@ -188,6 +188,12 @@ entities.post('/api/entities', async (c) => {
   // Within the observation cooldown a report still counts; only the observation isn't counted again.
   if (!observe.ok && !report) return c.json({ error: 'observed_recently' }, 429);
   const ipHash = limits.ipHash;
+  // A report inside the observation cooldown doesn't store these facts, so it
+  // records and returns the score that is stored.
+  if (!observe.ok) {
+    const row = await c.env.DB.prepare('SELECT signals_json FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id).first<{ signals_json: string }>();
+    if (row) score = safeJson<Score>(row.signals_json, score);
+  }
 
   // An observation updates the stored facts. A report inside the observation
   // cooldown only adds the report; the row is created if it's new.

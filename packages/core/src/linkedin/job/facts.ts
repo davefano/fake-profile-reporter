@@ -1,6 +1,6 @@
 // A job posting's facts, parsed from the public (logged-out) posting.
 
-import { byClass, firstText, htmlText, parseAgo, parseCount } from '../html';
+import { byClass, firstText, htmlText, parseAgo, parseCount, safeDecode } from '../html';
 import type { JobExtras } from './extras';
 
 export interface JobFacts {
@@ -47,7 +47,7 @@ export function parseJobPosting(html: string, jobId: string, now = Date.now()): 
   return {
     jobId,
     title: firstText(html, 'top-card-layout__title'),
-    company: { name: firstText(html, 'topcard__org-name-link', 'a'), slug: orgLink ? decodeURIComponent(orgLink[1]!) : null },
+    company: { name: firstText(html, 'topcard__org-name-link', 'a'), slug: orgLink ? safeDecode(orgLink[1]!) : null },
     location: firstText(html, 'topcard__flavor--bullet'),
     postedText: posted,
     postedAt: parseAgo(posted, now),

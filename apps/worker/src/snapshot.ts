@@ -6,7 +6,10 @@ import { SNAPSHOT_SCHEMA, type RawSnapshot } from '@flr/core';
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
-export function cleanSnapshot(v: unknown): RawSnapshot | null {
+/** A snapshot as uploaded: `capturedAt` is null when missing or not a number. */
+export type UploadedSnapshot = Omit<RawSnapshot, 'capturedAt'> & { capturedAt: number | null };
+
+export function cleanSnapshot(v: unknown): UploadedSnapshot | null {
   if (!isObject(v) || v.schema !== SNAPSHOT_SCHEMA || typeof v.slug !== 'string' || !isObject(v.payloads)) return null;
   const p = v.payloads;
   const payloads: RawSnapshot['payloads'] = {};
@@ -18,7 +21,7 @@ export function cleanSnapshot(v: unknown): RawSnapshot | null {
   if (isObject(v.errors)) for (const [k, e] of Object.entries(v.errors)) if (typeof e === 'string') errors[k] = e.slice(0, 200);
   return {
     schema: SNAPSHOT_SCHEMA,
-    capturedAt: typeof v.capturedAt === 'number' ? v.capturedAt : NaN,
+    capturedAt: typeof v.capturedAt === 'number' && Number.isFinite(v.capturedAt) ? v.capturedAt : null,
     slug: v.slug.slice(0, 200),
     profileId: typeof v.profileId === 'string' ? v.profileId : null,
     payloads,
