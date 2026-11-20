@@ -25,6 +25,8 @@ suggest suspicion; they never declare that someone is fake.
   the user.
 - **No feature flags** unless the user asks for one for this work.
 - **Clean up your mess.** Delete what your change replaces.
+- After a solved, verified problem, offer once to invoke the `ce-compound` skill at the completion checkpoint only when the work produced durable project reasoning that is not readily recoverable from the final code, tests, types, comments, or existing documentation, and losing it would plausibly cause recurrence, material risk, or substantial rediscovery. Apply this counterfactual: if the learning document disappeared, would a future engineer reading the final implementation still be likely to repeat the mistake or redo substantial investigation? If not, do not offer. Completion, effort, and diff size alone are not enough. Offer at the checkpoint so a qualifying learning can ship in the PR that produced it, and only where the repository treats captured learnings as tracked, committed knowledge.
+- Write every report, summary, or handoff to the user through the `ce-noslop` skill. This applies when you are the top-level agent writing to the user, not when you are a subagent reporting to its caller. Do not apply it to code, config, verbatim quotes, or text the user asked to post as written.
 
 ## Guards for this project
 
@@ -61,4 +63,5 @@ suggest suspicion; they never declare that someone is fake.
 - Logged-in research browser: agent-browser session `linkedin`; see
   [docs/research-browser.md](docs/research-browser.md)
 - Subagents and `/council`: [docs/agent-models.md](docs/agent-models.md) (§ Council)
+- Solved problems: `docs/solutions/` (documented fixes and patterns, by category, with YAML frontmatter: module, tags, problem_type); relevant when working in a documented area
 - An agent mistake: one line in [docs/agent-garden.md](docs/agent-garden.md); a repeat becomes a check
