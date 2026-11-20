@@ -185,7 +185,7 @@ for (const [n, target] of profileTargets.entries()) {
   const opts = JSON.stringify({ includeActivity: !flag('--no-activity') });
   const snap = await inPage<RawSnapshot>(`__flrCapture(${JSON.stringify(slug)}, ${opts})`);
 
-  const facts = extractProfileFacts(snap);
+  const facts = extractProfileFacts(snap, snap.capturedAt);
   if (!facts.memberId) {
     // Nothing to score: an empty capture would look suspicious for the wrong reason.
     console.log(`\n━━ ${slug}\n   profile unavailable (removed, restricted, or the slug changed); not scored`);

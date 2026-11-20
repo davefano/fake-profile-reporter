@@ -4,6 +4,7 @@
 
 import type { CompanyFacts } from './linkedin/company/facts';
 import type { JobFacts } from './linkedin/job/facts';
+import type { ProfileFacts } from './linkedin/profile/facts';
 import type { FactChange } from './linkedin/diff';
 import type { RiskLevel, Score } from './scam/signals';
 
@@ -57,8 +58,8 @@ export interface AccountResponse {
   headline: string | null;
   location: string | null;
   industry: string | null;
-  joined: { at: number; source: 'about' | 'memberId' } | null;
-  connections: { count: number; capped: boolean } | null;
+  joined: ProfileFacts['joined'];
+  connections: ProfileFacts['connections'];
   followers: number | null;
   postCount: number | null;
   lastActivityAt: number | null;

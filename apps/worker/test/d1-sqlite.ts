@@ -26,10 +26,14 @@ class Statement {
     return { results: this.db.query(this.sql).all(...this.params) as T[], success: true, meta: {} };
   }
 
-  async run() {
-    // Like D1: meta.changes counts the rows the statement wrote.
+  /** Like D1: meta.changes counts the rows the statement wrote. */
+  runSync() {
     const r = this.db.query(this.sql).run(...this.params);
     return { results: [], success: true, meta: { changes: r.changes } };
+  }
+
+  async run() {
+    return this.runSync();
   }
 }
 
@@ -39,7 +43,8 @@ export function createTestD1(): D1Database {
   db.exec(readFileSync(join(import.meta.dir, '../schema.sql'), 'utf8'));
   return {
     prepare: (sql: string) => new Statement(db, sql),
-    batch: async (stmts: Statement[]) => db.transaction(() => stmts.map((s) => s.run()))(),
+    // One transaction, results in order, as D1 returns them.
+    batch: async (stmts: Statement[]) => db.transaction(() => stmts.map((s) => s.runSync()))(),
   } as unknown as D1Database;
 }
 

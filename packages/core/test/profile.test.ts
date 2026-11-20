@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { captureProfile, carryForwardProfile, diffProfileFacts, observeProfile, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
+import { captureProfile, diffProfileFacts, observeProfile, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
 import { scoreProfile } from '../src/scam';
 import { DAY, fakeSnapshot, postIdAt, profileIdFor } from './fixtures';
 
@@ -90,10 +90,10 @@ test('diffProfileFacts reports slug, headline, and connection changes', () => {
   expect(diffProfileFacts(a, a)).toEqual([]);
 });
 
-test('carryForwardProfile keeps the last good values for parts that failed', () => {
+test('observeProfile keeps the last good values for parts that failed', () => {
   const good = extractProfileFacts(fakeSnapshot({ memberId: 700_000_123, headline: 'Engineer' }), NOW);
   const failed = { ...good, profileLoaded: false, headline: null, firstName: null, positions: [], about: null, connections: null };
-  const carried = carryForwardProfile(good, failed);
+  const carried = observeProfile(good, failed).current;
   expect(carried).toMatchObject({ profileLoaded: true, headline: 'Engineer', firstName: good.firstName, about: good.about, connections: good.connections });
   // A change made after the failed capture is still reported against the carried baseline.
   const later = { ...good, headline: 'CEO' };

@@ -40,10 +40,12 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_member ON account_snapshots(member_id, 
 
 -- What each account looks like now: the newest capture, with parts it failed
 -- to load carried forward from earlier ones (see observeProfile). Moves by
--- compare-and-swap on captured_at, so concurrent uploads can't lose facts.
+-- compare-and-swap on rev, in one transaction with everything that depends on
+-- it, so concurrent uploads can't lose facts or leave the listing stale.
 CREATE TABLE IF NOT EXISTS account_current (
   member_id    INTEGER PRIMARY KEY,
-  captured_at  INTEGER NOT NULL,
+  rev          TEXT NOT NULL,         -- random per write: the compare-and-swap token
+  captured_at  INTEGER NOT NULL,      -- for ordering captures, not for concurrency
   facts_json   TEXT NOT NULL,
   FOREIGN KEY (member_id) REFERENCES accounts(member_id)
 );

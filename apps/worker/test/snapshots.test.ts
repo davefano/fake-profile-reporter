@@ -160,23 +160,37 @@ describe('POST /api/snapshots', () => {
 });
 
 describe('account current facts', () => {
-  test('moving current facts is a compare-and-swap: a stale upload has to merge again', async () => {
+  test('a commit from a stale version writes nothing at all, even with the same capture time', async () => {
     const store = createAccountStore(env.DB);
-    const facts = extractProfileFacts(fakeSnapshot(), Date.UTC(2026, 10, 1));
-    await store.ensureAccount(700_000_001, facts, scoreProfile(facts), 1);
-    expect(await store.setCurrent(700_000_001, null, { facts, capturedAt: 10 })).toBe(true);
-    expect(await store.setCurrent(700_000_001, null, { facts, capturedAt: 20 })).toBe(false); // someone else created it
-    expect(await store.setCurrent(700_000_001, 5, { facts, capturedAt: 20 })).toBe(false); // read an old version
-    expect(await store.setCurrent(700_000_001, 10, { facts, capturedAt: 20 })).toBe(true);
+    const at = Date.UTC(2026, 10, 1);
+    const a = extractProfileFacts(fakeSnapshot({ headline: 'From A' }), at);
+    const b = extractProfileFacts(fakeSnapshot({ headline: 'From B' }), at);
+    const write = (f: typeof a) => ({ observed: { ...f, memberId: 700_000_001 }, score: scoreProfile(f, at), changes: [], r2Key: 'k', capturedAt: at, ipHash: 'h' });
+    await store.ensureAccount(700_000_001, a, scoreProfile(a, at), at);
+
+    // Both read "no current facts yet"; only the first commit lands.
+    expect(await store.commitNewest(write(a), null, { facts: a, score: scoreProfile(a, at) })).toBe(true);
+    expect(await store.commitNewest(write(b), null, { facts: b, score: scoreProfile(b, at) })).toBe(false);
+    // Both read the same version at the same capture time; only the first commit lands.
+    const v1 = (await store.current(700_000_001))!.rev;
+    expect(await store.commitNewest(write(b), v1, { facts: b, score: scoreProfile(b, at) })).toBe(true);
+    expect(await store.commitNewest(write(a), v1, { facts: a, score: scoreProfile(a, at) })).toBe(false);
+
+    const got = await account(700_000_001);
+    expect(got.headline).toBe('From B');
+    expect(got.snapshotCount).toBe(2); // the two losing commits stored nothing
+    expect(got.snapshots).toHaveLength(2);
+    const listed = await env.DB.prepare('SELECT headline FROM accounts WHERE member_id = 700000001').first<{ headline: string }>();
+    expect(listed?.headline).toBe('From B');
   });
 
-  test('accounts stored before current facts existed are rebuilt from their snapshots', async () => {
-    await post(fakeSnapshot({ firstName: 'Alex', headline: 'Engineer', capturedAt: Date.UTC(2026, 9, 1) }));
-    await env.DB.prepare('DELETE FROM account_current').run();
-    const partial = fakeSnapshot({ firstName: 'Alex', capturedAt: Date.UTC(2026, 9, 2) });
-    delete partial.payloads.fullProfile;
-    expect((await post(partial, { ip: '2.2.2.2' })).status).toBe(201);
-    expect(await account(700_000_001)).toMatchObject({ name: 'Alex Sample', headline: 'Engineer', location: 'Springfield, United States' });
+  test('if archiving fails, nothing in the database changes', async () => {
+    env.SNAPSHOTS.put = async () => {
+      throw new Error('R2 down');
+    };
+    const res = await post(fakeSnapshot());
+    expect(res.status).toBe(500);
+    expect((await app.request('/api/accounts/700000001', {}, env)).status).toBe(404);
   });
 
   test('impossible capture times are treated as now, never a 500', async () => {

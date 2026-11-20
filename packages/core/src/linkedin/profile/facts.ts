@@ -216,19 +216,14 @@ export function parseMutual(text: string | null | undefined): number | null {
   return named + others || null;
 }
 
-/**
- * The latest observation, with parts that failed to load filled in from the
- * previous one: what to compare the next capture with, and what to show as
- * current. A failed request is not an edit.
- */
-export function carryForwardProfile(prev: ProfileFacts | null, next: ProfileFacts): ProfileFacts {
-  return carryForward(prev, next).current;
-}
-
 /** Parts of a profile a capture can fail to read, by name. */
 export type ProfilePart = 'profile' | 'about' | 'connections' | 'followers' | 'activity';
 
-/** carryForwardProfile, also naming the parts that came from `prev`. */
+/**
+ * The latest observation, with parts that failed to load filled in from the
+ * previous one, and which parts those were. A failed request is not an edit.
+ * Callers use observeProfile (diff.ts), which adds the change list.
+ */
 export function carryForward(prev: ProfileFacts | null, next: ProfileFacts): { current: ProfileFacts; carried: ProfilePart[] } {
   if (!prev) return { current: next, carried: [] };
   const out = { ...next };

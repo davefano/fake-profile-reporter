@@ -12,7 +12,7 @@
 import { Hono, type Context } from 'hono';
 import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type RawSnapshot, type Score, type SnapshotResponse } from '@flr/core';
 import type { Env } from './env';
-import { createAccountStore, type CurrentFacts } from './accounts-store';
+import { createAccountStore } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';
 import { reporterLimits } from './limits';
 import { cleanSnapshot } from './snapshot';
@@ -82,32 +82,34 @@ accounts.post('/api/snapshots', async (c) => {
     if (stored) return finish(scoreProfile(stored.facts, stored.capturedAt), []);
   }
 
-  // Store the snapshot. The account's current facts move only from the version
-  // read here; if another upload moved them first, merge again.
-  await store.ensureAccount(memberId, facts, scoreProfile(facts, capturedAt), capturedAt);
-  let account: { facts: ProfileFacts; score: Score; changes: FactChange[] } | null = null;
-  let prev: CurrentFacts | null = null;
-  for (let attempt = 0; ; attempt++) {
-    prev = await store.current(memberId);
-    if (prev && prev.capturedAt > capturedAt) break; // a backfill: stored, but doesn't move the account
-    const { current, changes } = observeProfile(prev?.facts ?? null, facts);
-    if (await store.setCurrent(memberId, prev?.capturedAt ?? null, { facts: current, capturedAt })) {
-      account = { facts: current, score: scoreProfile(current, capturedAt), changes };
-      break;
-    }
-    if (attempt === 2) return c.json({ error: 'busy' }, 409);
-  }
-
+  // Store the snapshot. Archive first: if that fails, nothing in D1 has changed.
   const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${limits.ipHash.slice(0, 8)}.json.gz`;
   await c.env.SNAPSHOTS.put(r2Key, await gzip(new TextEncoder().encode(JSON.stringify(raw))), {
     httpMetadata: { contentType: 'application/json', contentEncoding: 'gzip' },
     customMetadata: { slug: facts.slug ?? '', schema: String(raw.schema) },
   });
-  const snapshotScore = account?.score ?? scoreProfile(facts, capturedAt);
-  await store.addSnapshot({ observed: { ...facts, memberId }, account, score: snapshotScore, changes: account?.changes ?? [], r2Key, capturedAt, ipHash: limits.ipHash });
-  await snapCd.commit();
+  const observedScore = scoreProfile(facts, capturedAt);
+  await store.ensureAccount(memberId, facts, observedScore, capturedAt);
+  const write = { observed: { ...facts, memberId }, score: observedScore, changes: [] as FactChange[], r2Key, capturedAt, ipHash: limits.ipHash };
 
-  return finish(account?.score ?? scoreProfile(prev!.facts, prev!.capturedAt), account?.changes ?? []);
+  // Merge with the account's current facts and commit, all or nothing, from the
+  // version read here. If another upload moved the account first, merge again.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const prev = await store.current(memberId);
+    if (prev && prev.capturedAt > capturedAt) {
+      // An older capture (a backfill): stored, but it doesn't move the account.
+      await store.commitBackfill(write);
+      await snapCd.commit();
+      return finish(scoreProfile(prev.facts, prev.capturedAt), []);
+    }
+    const { current, changes } = observeProfile(prev?.facts ?? null, facts);
+    const account = { facts: current, score: scoreProfile(current, capturedAt) };
+    if (await store.commitNewest({ ...write, changes }, prev?.rev ?? null, account)) {
+      await snapCd.commit();
+      return finish(account.score, changes);
+    }
+  }
+  return c.json({ error: 'busy' }, 409);
 });
 
 accounts.get('/api/leaderboard', async (c) => {

@@ -57,7 +57,10 @@ function readNotes(r: ScanResult) {
     const when = r.previousCheckAt ? ` (${ago(r.previousCheckAt)})` : '';
     notes.push(`Couldn't read ${r.carried.map((p) => PART_LABEL[p]).join(', ')} this time; shown from your earlier check${when}.`);
   }
-  const errors = Object.entries(r.errors ?? {});
+  // Errors for parts already shown from an earlier check would only repeat that note.
+  const carriedFrom: Record<string, ProfilePart> = { fullProfile: 'profile', about: 'about', followingState: 'followers', activity: 'activity', profilePageCounts: 'connections' };
+  const shown = new Set(r.kind === 'profile' ? (r.carried ?? []) : []);
+  const errors = Object.entries(r.errors ?? {}).filter(([k]) => !shown.has(carriedFrom[k]!));
   if (errors.length) notes.push(`Failed to load: ${errors.map(([k, v]) => `${k} (${v})`).join('; ')}`);
   return notes.length ? `<section class="group missing"><h3>About this read</h3><ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : '';
 }
