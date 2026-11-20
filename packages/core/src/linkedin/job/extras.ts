@@ -2,6 +2,7 @@
 // listing dates and reposts, state, hiring team, and the "Verified job" badge.
 
 import { endpoints } from '../endpoints';
+import { errorText } from '../errors';
 import { sessionFrom, type ReaderOptions } from '../session';
 
 export interface JobExtras {
@@ -19,11 +20,13 @@ export interface JobExtras {
   verified: boolean | null;
   /** People named in "Meet the hiring team". */
   hiringTeam: Array<{ slug: string; name: string | null }>;
+  /** Parts that failed, e.g. { verified: "HTTP 403" }. */
+  errors: Record<string, string>;
 }
 
-export function parseJobRecord(json: any): Omit<JobExtras, 'verified'> {
-  const d = json?.data ?? {};
-  const included: any[] = json?.included ?? [];
+export function parseJobRecord(json: unknown): Omit<JobExtras, 'verified' | 'errors'> {
+  const d = (json as any)?.data ?? {};
+  const included: any[] = (json as any)?.included ?? [];
   const team: JobExtras['hiringTeam'] = [];
   for (const e of included) {
     if (typeof e?.publicIdentifier === 'string' && /Profile$/.test(e.$type ?? '')) {
@@ -51,11 +54,12 @@ export function pageShowsVerifiedJob(html: string): boolean {
 export async function fetchJobExtras(jobId: string, opts: ReaderOptions = {}): Promise<JobExtras> {
   const s = sessionFrom(opts);
   const record = parseJobRecord(await s.voyager(endpoints.jobRecord(jobId)));
+  const errors: Record<string, string> = {};
   let verified: boolean | null = null;
   try {
     verified = pageShowsVerifiedJob(await s.html(endpoints.jobPage(jobId)));
-  } catch {
-    // leave unknown
+  } catch (e) {
+    errors.verified = errorText(e);
   }
-  return { ...record, verified };
+  return { ...record, verified, errors };
 }

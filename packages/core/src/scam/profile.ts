@@ -82,9 +82,9 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
     add('pattern.career-vs-age', `Claims ${careerYears} years of work history on a new account`, 10);
   }
 
-  // Recruiter/HR persona. Most job scams use one, so an unproven one matters more.
-  const verifications = f.about?.verifications ?? [];
-  if (RECRUITER.test(title) && !verifications.length) {
+  // Recruiter/HR persona. Most job scams use one, so an unproven one matters
+  // more. Only when verifications were actually read: unknown is not "none".
+  if (RECRUITER.test(title) && f.about && !f.about.verifications.length) {
     if (ageMs != null && ageMs < YEAR) add('pattern.recruiter-new', 'Recruiter/HR persona on an account under a year old', 15);
     else add('pattern.recruiter-unverified', 'Recruiter/HR persona with no verification', 6);
   }
@@ -166,7 +166,7 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   }
 
   // Connections you share. Relative to the viewer: real to *you*, not proof in general.
-  if (f.mutualConnections) add('trust.mutual', `${f.mutualConnections} mutual connection${f.mutualConnections === 1 ? '' : 's'} with you`, -Math.min(10, 3 + f.mutualConnections));
+  if (f.mutualConnections) add('trust.mutual', `${f.mutualConnections} mutual connection${f.mutualConnections === 1 ? '' : 's'} with you (relative to you; not in the shared score)`, -Math.min(10, 3 + f.mutualConnections));
 
   // Other trust signals.
   if (f.premium) add('trust.premium', 'Premium subscriber', -4);

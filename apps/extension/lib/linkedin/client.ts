@@ -33,11 +33,13 @@ export async function activeLinkedInTab(): Promise<LinkedInTab | null> {
 }
 
 // Tabs opened before the extension was installed or reloaded have no content
-// script yet: inject it and retry once.
+// script yet: inject it and retry once. Only when nothing is listening; any
+// other failure (a closed port mid-read) is passed on, not retried.
 async function ask<K extends keyof LinkedInMessages>(tabId: number, msg: LinkedInMessages[K]['req']): Promise<LinkedInMessages[K]['res']> {
   try {
     return await sendToTab<LinkedInMessages, K>(tabId, msg);
-  } catch {
+  } catch (e) {
+    if (!/Receiving end does not exist|Could not establish connection/i.test(String(e))) throw e;
     await browser.scripting.executeScript({ target: { tabId }, files: ['/content-scripts/content.js'] });
     return sendToTab<LinkedInMessages, K>(tabId, msg);
   }
@@ -58,9 +60,11 @@ function viaTab(tabId: number) {
 }
 
 export const linkedin = {
-  /** A profile's facts and raw snapshot, read in the LinkedIn tab (signed in, about 6 requests). */
-  async profile(tabId: number, slug: string, opts: { includeActivity?: boolean } = {}): Promise<ProfileResult> {
-    return unwrap(await ask<'LI_PROFILE'>(tabId, { type: 'LI_PROFILE', slug, includeActivity: opts.includeActivity }));
+  /** A profile's facts, read in a signed-in LinkedIn tab (about 6 requests). Add the raw snapshot with includeSnapshot. */
+  async profile(slug: string, opts: { tab: LinkedInTab | null; includeActivity?: boolean; includeSnapshot?: boolean }): Promise<ProfileResult> {
+    if (!opts.tab?.signedInReachable) throw Object.assign(new Error('Open this profile on www.linkedin.com to check it.'), { code: 'capture_failed' });
+    const { includeActivity, includeSnapshot } = opts;
+    return unwrap(await ask<'LI_PROFILE'>(opts.tab.tabId, { type: 'LI_PROFILE', slug, includeActivity, includeSnapshot }));
   },
 
   /** A company page's facts. With a signed-in LinkedIn tab, the extras too. */

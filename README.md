@@ -52,8 +52,9 @@ bun run db:init:local     # create the local D1 database (once)
 
 ```bash
 bun run dev:api           # API + leaderboard at http://localhost:8787
-bun run dev:ext           # opens Chrome with the extension loaded, hot reload
-bun run dev:ext:firefox   # same, in Firefox
+bun run build:ext         # then load apps/extension/.output/chrome-mv3 unpacked; Chrome 158+ won't
+                          # load extensions under automation, so dev:ext can't drive Chrome
+bun run dev:ext:firefox   # Firefox with the extension loaded, hot reload
 ```
 
 Visit any `https://www.linkedin.com/in/...` profile and click the toolbar icon.

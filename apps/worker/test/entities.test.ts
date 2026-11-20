@@ -72,6 +72,8 @@ describe('POST /api/entities', () => {
     expect(body.score.signals.map((s: any) => s.id)).toEqual(expect.arrayContaining(['job.chat-app', 'job.pay-to-work', 'job.company-suspicious']));
     const got = (await (await app.request('/api/entities/job/4400000009', {}, env)).json()) as any;
     expect(got.reports).toBe(1);
+    expect(got.company.slug).toBe('example-brand-careers'); // kept, so the job score can be reproduced
+    expect(got.score.missing).toBeArray();
   });
 
   test('rate limits: one report per IP per day, observations every 10 minutes', async () => {
@@ -81,6 +83,13 @@ describe('POST /api/entities', () => {
     expect((await post({ kind: 'company', id: '4242', facts: company(), report: true }, '2.2.2.2')).status).toBe(201);
     const got = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
     expect(got.reports).toBe(2);
+  });
+
+  test('a report inside the observation cooldown adds the report without overwriting facts', async () => {
+    expect((await post({ kind: 'company', id: '4242', facts: company(), report: false })).status).toBe(201);
+    expect((await post({ kind: 'company', id: '4242', facts: company({ name: 'Changed Name' }), report: true })).status).toBe(201);
+    const got = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
+    expect(got).toMatchObject({ name: 'Example Brand Careers', observations: 1, reports: 1 });
   });
 
   test('rejects malformed or mismatched submissions', async () => {

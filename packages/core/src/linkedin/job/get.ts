@@ -3,14 +3,15 @@
 
 import type { CompanyExtras } from '../company/extras';
 import type { CompanyFacts } from '../company/facts';
-import { getCompany, message, type SignedIn } from '../company/get';
+import { getCompany } from '../company/get';
 import { endpoints } from '../endpoints';
-import { sessionFrom, type ReaderOptions } from '../session';
+import { errorText } from '../errors';
+import { sessionFrom, type ReaderOptions, type SignedIn } from '../session';
 import { fetchJobExtras, type JobExtras } from './extras';
 import { parseJobPosting, type JobFacts } from './facts';
 
 export interface JobOptions extends ReaderOptions {
-  signedIn?: true | { job: (jobId: string) => Promise<JobExtras>; company: (slug: string) => Promise<CompanyExtras> };
+  signedIn?: true | { job: Exclude<SignedIn<JobExtras>, true>; company: Exclude<SignedIn<CompanyExtras>, true> };
   /** Also get the company page the posting links to (default true). */
   includeCompany?: boolean;
 }
@@ -18,7 +19,7 @@ export interface JobOptions extends ReaderOptions {
 export interface JobWithCompany {
   job: JobFacts;
   company: CompanyFacts | null;
-  /** What failed: "extras", "company", "company.extras". The facts that did load are kept. */
+  /** What failed: "extras", "extras.verified", "company", "company.extras", … The facts that did load are kept. */
   errors: Record<string, string>;
 }
 
@@ -37,7 +38,8 @@ export async function getJob(jobId: string, opts: JobOptions = {}): Promise<JobW
   const signedIn = opts.signedIn;
   if (signedIn) {
     const read = signedIn === true ? (id: string) => fetchJobExtras(id, { session }) : signedIn.job;
-    job.extras = await read(jobId).catch((e) => ((errors.extras = message(e)), null));
+    job.extras = await read(jobId).catch((e) => ((errors.extras = errorText(e)), null));
+    for (const [k, v] of Object.entries(job.extras?.errors ?? {})) errors[`extras.${k}`] = v;
   }
   let company: CompanyFacts | null = null;
   if (opts.includeCompany !== false && job.company.slug) {
@@ -45,9 +47,9 @@ export async function getJob(jobId: string, opts: JobOptions = {}): Promise<JobW
     try {
       const r = await getCompany(job.company.slug, { session, signedIn: companySignedIn });
       company = r.facts;
-      if (r.errors.extras) errors['company.extras'] = r.errors.extras;
+      for (const [k, v] of Object.entries(r.errors)) errors[`company.${k}`] = v;
     } catch (e) {
-      errors.company = message(e);
+      errors.company = errorText(e);
     }
   }
   return { job, company, errors };

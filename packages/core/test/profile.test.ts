@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { captureProfile, diffProfileFacts, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
+import { captureProfile, carryForwardProfile, diffProfileFacts, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
 import { scoreProfile } from '../src/scam';
 import { DAY, fakeSnapshot, postIdAt, profileIdFor } from './fixtures';
 
@@ -88,6 +88,16 @@ test('diffProfileFacts reports slug, headline, and connection changes', () => {
   const b = extractProfileFacts(fakeSnapshot({ slug: 'new-slug', headline: 'CEO', connections: '40 connections' }), NOW);
   expect(diffProfileFacts(a, b).map((c) => c.field).sort()).toEqual(['connections', 'headline', 'slug']);
   expect(diffProfileFacts(a, a)).toEqual([]);
+});
+
+test('carryForwardProfile keeps the last good values for parts that failed', () => {
+  const good = extractProfileFacts(fakeSnapshot({ memberId: 700_000_123, headline: 'Engineer' }), NOW);
+  const failed = { ...good, profileLoaded: false, headline: null, firstName: null, positions: [], about: null, connections: null };
+  const carried = carryForwardProfile(good, failed);
+  expect(carried).toMatchObject({ profileLoaded: true, headline: 'Engineer', firstName: good.firstName, about: good.about, connections: good.connections });
+  // A change made after the failed capture is still reported against the carried baseline.
+  const later = { ...good, headline: 'CEO' };
+  expect(diffProfileFacts(carried, later).map((c) => c.field)).toEqual(['headline']);
 });
 
 test('diffProfileFacts ignores parts that failed to load', () => {
@@ -224,6 +234,13 @@ describe('scoreProfile', () => {
     const f = extractProfileFacts(fakeSnapshot({ joinedAt: Date.UTC(2011, 6, 15), photoUploadedAt: null, postTimes: [NOW - 30 * DAY] }), NOW);
     const ids = scoreProfile({ ...f, about: { ...f.about!, contactInfoUpdated: 'Updated less than 6 months ago' } }, NOW).signals.map((x) => x.id);
     expect(ids.filter((id) => id.startsWith('aged.'))).toEqual([]);
+  });
+
+  test('a recruiter is not penalized for verifications that were never read', () => {
+    const f = extractProfileFacts(fakeSnapshot({ joinedAt: null, headline: 'Senior Recruiter' }), NOW);
+    const ids = scoreProfile({ ...f, about: null, joined: { at: NOW - 100 * DAY, source: 'memberId' } }, NOW).signals.map((x) => x.id);
+    expect(ids).not.toContain('pattern.recruiter-new');
+    expect(ids).not.toContain('pattern.recruiter-unverified');
   });
 
   test('member-ID age estimates count for half', () => {

@@ -3,6 +3,7 @@
 // one profile at a time. Turn it into facts with extractProfileFacts().
 
 import { activityRequest, aboutRequest, endpoints } from '../endpoints';
+import { errorText } from '../errors';
 import { profileIdFromUrn } from '../ids';
 import { sessionFrom, type ReaderOptions } from '../session';
 import { parseMutual, resolvedProfile } from './facts';
@@ -20,7 +21,7 @@ export async function captureProfile(slug: string, opts: CaptureOptions = {}): P
     try {
       snap.payloads[key] = await fn();
     } catch (e) {
-      snap.errors[key] = String((e as Error)?.message ?? e);
+      snap.errors[key] = errorText(e);
     }
   };
 

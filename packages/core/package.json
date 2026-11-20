@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./linkedin": "./src/linkedin/index.ts",
     "./scam": "./src/scam/index.ts",
+    "./wire": "./src/wire.ts",
     "./test/fixtures": "./test/fixtures.ts"
   },
   "scripts": {

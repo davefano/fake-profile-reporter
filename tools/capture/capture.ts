@@ -21,7 +21,6 @@ import {
   getCompany,
   getJob,
   linkedInTarget,
-  normalizeProfileUrl,
   type CompanyExtras,
   type JobExtras,
   type RawSnapshot,
@@ -60,7 +59,8 @@ async function bundle(): Promise<string> {
 }
 
 function slugOf(t: string) {
-  return normalizeProfileUrl(t.includes('/') ? t : `linkedin.com/in/${t}`)?.handle ?? null;
+  const target = linkedInTarget(t.includes('/') ? (/^https?:/.test(t) ? t : `https://${t.replace(/^\/+/, '')}`) : `https://www.linkedin.com/in/${t}/`);
+  return target?.kind === 'profile' ? target.slug : null;
 }
 
 function previousSnapshot(memberId: number): RawSnapshot | null {
@@ -180,14 +180,11 @@ for (const [n, target] of profileTargets.entries()) {
   const score = scoreProfile(facts);
   const gz = gzipSync(JSON.stringify(snap));
 
-  let changes: ReturnType<typeof diffProfileFacts> = [];
-  if (facts.memberId) {
-    const prev = previousSnapshot(facts.memberId);
-    if (prev) changes = diffProfileFacts(extractProfileFacts(prev), facts);
-    const dir = join(SNAP_DIR, String(facts.memberId));
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(join(dir, `${new Date(snap.capturedAt).toISOString().replace(/[:.]/g, '-')}.json.gz`), gz, { mode: 0o600 });
-  }
+  const prev = previousSnapshot(facts.memberId);
+  const changes = prev ? diffProfileFacts(extractProfileFacts(prev), facts) : [];
+  const dir = join(SNAP_DIR, String(facts.memberId));
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, `${new Date(snap.capturedAt).toISOString().replace(/[:.]/g, '-')}.json.gz`), gz, { mode: 0o600 });
 
   const name = [facts.firstName, facts.lastName].filter(Boolean).join(' ') || slug;
   console.log(`\n━━ ${name}  (${facts.slug})  member ${facts.memberId ?? '?'}`);

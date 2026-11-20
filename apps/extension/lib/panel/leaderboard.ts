@@ -1,12 +1,15 @@
 // The Leaderboard tab: reported profiles from the directory.
 
-import type { LeaderboardRow } from '@flr/core';
+import type { LeaderboardRow } from '@flr/core/wire';
 import { isError } from '@/lib/runtime';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
 import { avatar } from './views';
 
 let boardLoaded = false;
+
+/** Load again next time the tab opens (after a report). */
+export const invalidateLeaderboard = () => (boardLoaded = false);
 
 export async function loadLeaderboard(list: HTMLElement) {
   if (boardLoaded) return;

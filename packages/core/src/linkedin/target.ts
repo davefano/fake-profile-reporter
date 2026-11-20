@@ -17,7 +17,8 @@ export function linkedInTarget(url: string | null | undefined): LinkedInTarget |
   const path = decodeURIComponent(u.pathname);
   const job = u.searchParams.get('currentJobId') ?? /^\/jobs\/view\/(?:[^/]*-)?(\d{6,})\/?/.exec(path)?.[1];
   if (job && /^\d+$/.test(job)) return { kind: 'job', id: job };
-  const profile = /^\/in\/([^/]+)/.exec(path)?.[1];
+  // Optional locale prefix: /en/in/<slug>.
+  const profile = /^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?in\/([^/]+)/i.exec(path)?.[1];
   if (profile) return { kind: 'profile', slug: profile };
   const company = /^\/(?:company|showcase|school)\/([^/]+)/.exec(path)?.[1];
   if (company) return { kind: 'company', slug: company };

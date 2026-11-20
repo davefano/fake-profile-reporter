@@ -2,7 +2,7 @@
 // anything outside itself. Scoring may read LinkedIn types but never fetch.
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 const SRC = join(import.meta.dir, '../src');
 
@@ -20,7 +20,7 @@ export function imports(file: string): string[] {
 function leaving(dir: string, allowPackages: (spec: string) => boolean = () => false) {
   return sourceFiles(dir).flatMap((f) =>
     imports(f)
-      .filter((spec) => (spec.startsWith('.') ? !resolve(dirname(f), spec).startsWith(dir) : !allowPackages(spec)))
+      .filter((spec) => (spec.startsWith('.') ? !resolve(dirname(f), spec).startsWith(dir + sep) : !allowPackages(spec)))
       .map((spec) => `${relative(SRC, f)} -> ${spec}`),
   );
 }
@@ -30,12 +30,19 @@ describe('layers', () => {
     expect(leaving(join(SRC, 'linkedin'))).toEqual([]);
   });
 
-  test('src/scam reads LinkedIn types but never fetches', () => {
-    const fetching = sourceFiles(join(SRC, 'scam')).flatMap((f) =>
+  test('src/scam imports only its own files and LinkedIn facts types (never a reader)', () => {
+    const scam = join(SRC, 'scam');
+    // Pure modules only: facts types and URL helpers. The barrel re-exports readers, so it isn't allowed.
+    const allowed = ['linkedin/profile/facts', 'linkedin/company/facts', 'linkedin/job/facts', 'linkedin/url'].map((p) => join(SRC, p));
+    const offenders = sourceFiles(scam).flatMap((f) =>
       imports(f)
-        .filter((spec) => /linkedin\/(session|endpoints|profile\/capture|company\/(get|extras)|job\/(get|extras))$/.test(spec))
+        .filter((spec) => {
+          if (!spec.startsWith('.')) return true;
+          const target = resolve(dirname(f), spec);
+          return !target.startsWith(scam + sep) && !allowed.includes(target);
+        })
         .map((spec) => `${relative(SRC, f)} -> ${spec}`),
     );
-    expect(fetching).toEqual([]);
+    expect(offenders).toEqual([]);
   });
 });

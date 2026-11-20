@@ -5,6 +5,7 @@
 import { endpoints } from '../endpoints';
 import { memberIdFromProfileId, profileIdFromUrn } from '../ids';
 import { estimateJoinedAt } from '../join-estimate';
+import { errorText } from '../errors';
 import { sessionFrom, type ReaderOptions } from '../session';
 
 export interface EmployeeSample {
@@ -31,10 +32,12 @@ export interface CompanyExtras {
   phone: string | null;
   locations: number | null;
   employees: EmployeeSample | null;
+  /** Parts that failed, e.g. { employees: "HTTP 400" } when the search query rotated. */
+  errors: Record<string, string>;
 }
 
-export function parseCompanyRecord(json: any, slug: string): Omit<CompanyExtras, 'employees'> & { companyId: number | null } {
-  const co = (json?.included ?? []).find((e: any) => e?.$type === 'com.linkedin.voyager.organization.Company' && e.universalName === slug);
+export function parseCompanyRecord(json: unknown, slug: string): Omit<CompanyExtras, 'employees' | 'errors'> & { companyId: number | null } {
+  const co = ((json as any)?.included ?? []).find((e: any) => e?.$type === 'com.linkedin.voyager.organization.Company' && e.universalName === slug);
   const bool = (v: unknown) => (typeof v === 'boolean' ? v : null);
   return {
     companyId: Number(/:(\d+)$/.exec(co?.entityUrn ?? '')?.[1]) || null,
@@ -49,8 +52,8 @@ export function parseCompanyRecord(json: any, slug: string): Omit<CompanyExtras,
 
 const YEAR = 365.25 * 86_400_000;
 
-export function parsePeopleSearch(json: any, now = Date.now()): EmployeeSample {
-  const results = (json?.included ?? []).filter((e: any) => /EntityResultViewModel$/.test(e?.$type ?? ''));
+export function parsePeopleSearch(json: unknown, now = Date.now()): EmployeeSample {
+  const results = ((json as any)?.included ?? []).filter((e: any) => /EntityResultViewModel$/.test(e?.$type ?? ''));
   let hidden = 0;
   let newAccounts = 0;
   let oldAccounts = 0;
@@ -67,7 +70,7 @@ export function parsePeopleSearch(json: any, now = Date.now()): EmployeeSample {
     if (now - joined < YEAR) newAccounts++;
     else if (now - joined > 5 * YEAR) oldAccounts++;
   }
-  return { total: findTotal(json?.data), sampled: results.length, hidden, newAccounts, oldAccounts };
+  return { total: findTotal((json as any)?.data), sampled: results.length, hidden, newAccounts, oldAccounts };
 }
 
 function findTotal(node: any, depth = 0): number | null {
@@ -83,13 +86,14 @@ function findTotal(node: any, depth = 0): number | null {
 export async function fetchCompanyExtras(slug: string, opts: ReaderOptions & { now?: number } = {}): Promise<CompanyExtras> {
   const s = sessionFrom(opts);
   const { companyId, ...record } = parseCompanyRecord(await s.voyager(endpoints.companyRecord(slug)), slug);
+  const errors: Record<string, string> = {};
   let employees: EmployeeSample | null = null;
   if (companyId) {
     try {
       employees = parsePeopleSearch(await s.voyager(endpoints.companyPeople(companyId)), opts.now);
-    } catch {
-      // the search query id rotates; the rest still counts
+    } catch (e) {
+      errors.employees = errorText(e); // the search query id rotates; the rest still counts
     }
   }
-  return { ...record, employees };
+  return { ...record, employees, errors };
 }

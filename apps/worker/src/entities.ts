@@ -1,10 +1,12 @@
 // Company pages and job postings.
 //
-//   POST /api/entities                 { kind, id, url, facts, company?, report } → observation (+ report)
-//   GET  /api/entities/:kind/:id       latest facts, score, report count
+//   POST /api/entities                 EntityRequest → observation (+ report)
+//   GET  /api/entities/:kind/:id       EntityRecord: latest facts, score, counts
 //
-// The client sends facts it read from LinkedIn's public pages. We check their
-// shape, recompute the score ourselves, and rate-limit per IP.
+// The client sends facts it read from LinkedIn's public pages; the worker
+// can't fetch them itself. We check their shape, recompute the score ourselves,
+// and rate-limit per reporter. A job is stored with the company facts its
+// score used, so the score can be reproduced.
 
 import { Hono } from 'hono';
 import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type EntityRecord, type EntityResponse, type JobExtras, type JobFacts, type Score } from '@flr/core';
@@ -28,7 +30,8 @@ const str = (v: unknown, max = 500) => (typeof v === 'string' ? v.slice(0, max) 
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const strs = (v: unknown, n = 50) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, n).map((x) => x.slice(0, 200)) : []);
 
-export function cleanCompany(v: any): CompanyFacts | null {
+export function cleanCompany(v_: unknown): CompanyFacts | null {
+  const v = v_ as any;
   if (!v || typeof v !== 'object' || typeof v.slug !== 'string') return null;
   const size = v.claimedSize && typeof v.claimedSize === 'object' && num(v.claimedSize.min) != null
     ? { min: num(v.claimedSize.min)!, max: num(v.claimedSize.max), label: str(v.claimedSize.label, 60) ?? '' }
@@ -56,7 +59,8 @@ export function cleanCompany(v: any): CompanyFacts | null {
 
 const bool = (v: unknown) => (typeof v === 'boolean' ? v : null);
 
-function cleanCompanyExtras(v: any): CompanyExtras | null {
+function cleanCompanyExtras(v_: unknown): CompanyExtras | null {
+  const v = v_ as any;
   if (!v || typeof v !== 'object') return null;
   const e = v.employees;
   const n = (x: unknown) => Math.max(0, Math.min(1000, num(x) ?? 0));
@@ -67,6 +71,7 @@ function cleanCompanyExtras(v: any): CompanyExtras | null {
     staffing: bool(v.staffing),
     phone: str(v.phone, 40),
     locations: num(v.locations),
+    errors: {},
     employees:
       e && typeof e === 'object'
         ? { total: num(e.total), sampled: n(e.sampled), hidden: n(e.hidden), newAccounts: n(e.newAccounts), oldAccounts: n(e.oldAccounts) }
@@ -74,7 +79,8 @@ function cleanCompanyExtras(v: any): CompanyExtras | null {
   };
 }
 
-function cleanJobExtras(v: any): JobExtras | null {
+function cleanJobExtras(v_: unknown): JobExtras | null {
+  const v = v_ as any;
   if (!v || typeof v !== 'object') return null;
   return {
     applyUrl: str(v.applyUrl, 1000),
@@ -85,13 +91,15 @@ function cleanJobExtras(v: any): JobExtras | null {
     remote: bool(v.remote),
     thirdPartySourced: bool(v.thirdPartySourced),
     verified: bool(v.verified),
+    errors: {},
     hiringTeam: Array.isArray(v.hiringTeam)
       ? v.hiringTeam.slice(0, 10).filter((p: any) => typeof p?.slug === 'string').map((p: any) => ({ slug: p.slug.slice(0, 200), name: str(p.name, 200) }))
       : [],
   };
 }
 
-export function cleanJob(v: any, id: string): JobFacts | null {
+export function cleanJob(v_: unknown, id: string): JobFacts | null {
+  const v = v_ as any;
   if (!v || typeof v !== 'object' || String(v.jobId) !== id) return null;
   const salary = v.salary && typeof v.salary === 'object' && typeof v.salary.text === 'string'
     ? { text: v.salary.text.slice(0, 120), min: num(v.salary.min), max: num(v.salary.max), period: ['hour', 'year', 'month', 'week'].includes(v.salary.period) ? v.salary.period : null }
@@ -117,6 +125,20 @@ export function cleanJob(v: any, id: string): JobFacts | null {
   };
 }
 
+interface EntityRow {
+  name: string | null;
+  url: string;
+  score: number;
+  level: string;
+  score_version: number;
+  facts_json: string;
+  signals_json: string;
+  first_seen: number;
+  last_seen: number;
+  observation_count: number;
+  report_count: number;
+}
+
 // --- routes ------------------------------------------------------------------------
 
 entities.post('/api/entities', async (c) => {
@@ -136,12 +158,12 @@ entities.post('/api/entities', async (c) => {
   const now = Date.now();
   let name: string | null;
   let url: string;
-  let facts: CompanyFacts | JobFacts;
-  let score;
+  let stored: CompanyFacts | { job: JobFacts; company: CompanyFacts | null };
+  let score: Score;
   if (kind === 'company') {
     const f = cleanCompany(body.facts);
     if (!f || (f.companyId != null ? String(f.companyId) !== id : f.slug !== id)) return c.json({ error: 'bad_facts' }, 400);
-    facts = f;
+    stored = f;
     name = f.name;
     url = `https://www.linkedin.com/company/${encodeURIComponent(f.slug)}/`;
     score = scoreCompany(f, now);
@@ -150,7 +172,7 @@ entities.post('/api/entities', async (c) => {
     const f = cleanJob(body.facts, id);
     if (!f) return c.json({ error: 'bad_facts' }, 400);
     const company = body.company ? cleanCompany(body.company) : null;
-    facts = f;
+    stored = { job: f, company };
     name = f.title;
     url = `https://www.linkedin.com/jobs/view/${id}/`;
     score = scoreJob(f, company, company ? scoreCompany(company, now) : null);
@@ -166,20 +188,29 @@ entities.post('/api/entities', async (c) => {
   // Within the observation cooldown a report still counts; only the observation isn't counted again.
   if (!observe.ok && !report) return c.json({ error: 'observed_recently' }, 429);
   const ipHash = limits.ipHash;
-  const observedRecently = !observe.ok;
 
+  // An observation updates the stored facts. A report inside the observation
+  // cooldown only adds the report; the row is created if it's new.
   const db = c.env.DB;
+  const values = [kind, id, name, url, score.score, score.level, score.version, JSON.stringify(stored), JSON.stringify(score), now];
   const stmts = [
-    db
-      .prepare(
-        `INSERT INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count, report_count)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, ?11, 0)
-         ON CONFLICT (kind, entity_id) DO UPDATE SET
-           name = excluded.name, url = excluded.url, score = excluded.score, level = excluded.level,
-           score_version = excluded.score_version, facts_json = excluded.facts_json, signals_json = excluded.signals_json,
-           last_seen = excluded.last_seen, observation_count = entities.observation_count + excluded.observation_count`,
-      )
-      .bind(kind, id, name, url, score.score, score.level, score.version, JSON.stringify(facts), JSON.stringify(score), now, observedRecently ? 0 : 1),
+    observe.ok
+      ? db
+          .prepare(
+            `INSERT INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count, report_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 1, 0)
+             ON CONFLICT (kind, entity_id) DO UPDATE SET
+               name = excluded.name, url = excluded.url, score = excluded.score, level = excluded.level,
+               score_version = excluded.score_version, facts_json = excluded.facts_json, signals_json = excluded.signals_json,
+               last_seen = excluded.last_seen, observation_count = entities.observation_count + 1`,
+          )
+          .bind(...values)
+      : db
+          .prepare(
+            `INSERT OR IGNORE INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count, report_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 1, 0)`,
+          )
+          .bind(...values),
   ];
   if (report) {
     stmts.push(
@@ -189,7 +220,7 @@ entities.post('/api/entities', async (c) => {
   }
   await db.batch(stmts);
 
-  await observe.commit();
+  if (observe.ok) await observe.commit();
   await reportCd?.commit();
   await day.commit();
 
@@ -201,24 +232,24 @@ entities.get('/api/entities/:kind/:id', async (c) => {
   const kind = c.req.param('kind');
   const id = c.req.param('id');
   if (!isKind(kind)) return c.json({ error: 'bad_entity' }, 400);
-  const row = await c.env.DB.prepare('SELECT * FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id).first<Record<string, any>>();
+  const row = await c.env.DB.prepare('SELECT * FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id).first<EntityRow>();
   if (!row) return c.json({ error: 'not_found' }, 404);
-  const stored = safeJson<Partial<Score> | Score['signals']>(row.signals_json, []);
-  // Older rows stored only the signals array.
-  const score: Score = Array.isArray(stored)
-    ? { score: row.score, level: row.level, version: row.score_version, signals: stored, missing: [] }
-    : { score: row.score, level: row.level, version: row.score_version, signals: stored.signals ?? [], missing: stored.missing ?? [] };
-  const res: EntityRecord = {
-    kind,
+  const base = {
     id,
     name: row.name,
     url: row.url,
-    score,
-    facts: safeJson(row.facts_json, {} as EntityRecord['facts']),
+    score: safeJson<Score>(row.signals_json, { score: row.score, level: row.level as Score['level'], version: row.score_version as Score['version'], signals: [], missing: [] }),
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
     observations: row.observation_count,
     reports: row.report_count,
   };
+  let res: EntityRecord;
+  if (kind === 'company') {
+    res = { ...base, kind, facts: safeJson(row.facts_json, {} as CompanyFacts) };
+  } else {
+    const { job, company } = safeJson(row.facts_json, { job: {} as JobFacts, company: null as CompanyFacts | null });
+    res = { ...base, kind, facts: job, company };
+  }
   return c.json(res);
 });

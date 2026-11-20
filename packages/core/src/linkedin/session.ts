@@ -17,8 +17,8 @@ export interface SessionOptions {
 }
 
 export interface LinkedInSession {
-  /** Internal JSON API (voyager), signed in. */
-  voyager<T = any>(path: string): Promise<T>;
+  /** Internal JSON API (voyager), signed in. Payloads are untyped: parse them. */
+  voyager(path: string): Promise<unknown>;
   /** Server-driven UI action (RSC flight stream), signed in. */
   rsc(req: { url: string; body: unknown }): Promise<string>;
   /** A page as the signed-in viewer sees it. */
@@ -47,7 +47,7 @@ export function createSession(opts: SessionOptions = {}): LinkedInSession {
   return {
     async voyager(path) {
       const r = await ok(await f(base + path, { credentials: 'include', headers: { ...VOYAGER_HEADERS, 'csrf-token': csrf() } }));
-      return (await r.json()) as any;
+      return r.json() as Promise<unknown>;
     },
     async rsc({ url, body }) {
       const r = await ok(
@@ -80,3 +80,10 @@ export interface ReaderOptions extends SessionOptions {
 }
 
 export const sessionFrom = (o: ReaderOptions = {}) => o.session ?? createSession(o);
+
+/**
+ * How a getter reads signed-in extras: `true` through its own session (a
+ * logged-in linkedin.com page context), or a function for callers that reach
+ * the signed-in session some other way (a browser tab, an automated browser).
+ */
+export type SignedIn<T> = true | ((key: string) => Promise<T>);

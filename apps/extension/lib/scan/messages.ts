@@ -3,7 +3,7 @@
 
 import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget } from '@flr/core/linkedin';
 import type { Score } from '@flr/core/scam';
-import type { LeaderboardResponse } from '@flr/core';
+import type { LeaderboardResponse } from '@flr/core/wire';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
 import { send, type ErrorResponse } from '@/lib/runtime';
 
@@ -28,6 +28,7 @@ export interface CompanyScan extends History {
   facts: CompanyFacts;
   score: Score;
   capturedAt: number;
+  errors: Record<string, string>;
 }
 
 export interface JobScan extends History {
@@ -48,7 +49,8 @@ export const targetKey = (t: LinkedInTarget | null) => (t ? `${t.kind}:${t.kind 
 export const scanKey = (r: ScanResult) => (r.kind === 'job' ? `job:${r.id}` : `${r.kind}:${r.slug}`);
 
 export type ScanResponse = ScanResult | ErrorResponse;
-export type SubmitResponse = { ok: true; reported: boolean; score?: number } | ErrorResponse;
+/** On success, the directory's own score (it can differ from the panel's: see scoreProfile's mutual connections). */
+export type SubmitResponse = { ok: true; reported: boolean; score: number } | ErrorResponse;
 
 export interface AppMessages {
   /** Scan the active tab's profile, company, or job. */

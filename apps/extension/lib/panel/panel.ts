@@ -5,7 +5,7 @@ import { API_BASE } from '@/lib/config';
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { linkedInTarget } from '@flr/core/linkedin';
 import { scanKey, sendMessage, targetKey, type ScanResult } from '@/lib/scan/messages';
-import { loadLeaderboard } from './leaderboard';
+import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
 import { renderResult } from './views';
 import './panel.css';
 
@@ -145,7 +145,10 @@ async function submit(report: boolean) {
     btn.textContent = report ? 'Reported ✓' : 'Tracked ✓';
     other.disabled = report; // can still report after tracking
     status.className = 'status ok';
-    status.textContent = report ? 'Reported and saved to the directory. Thank you.' : 'Saved to the shared directory.';
+    // The directory scores without viewer-relative signals, so its number can differ.
+    const theirs = res.score !== current.score.score ? ` The directory scores it ${res.score}/100.` : '';
+    status.textContent = (report ? 'Reported and saved to the directory. Thank you.' : 'Saved to the shared directory.') + theirs;
+    if (res.reported) invalidateLeaderboard();
     return;
   }
   btn.disabled = other.disabled = false;

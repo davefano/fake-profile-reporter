@@ -10,19 +10,12 @@
 // score is never trusted.
 
 import { Hono, type Context } from 'hono';
-import {
-  diffProfileFacts,
-  extractProfileFacts,
-  scoreProfile,
-  SNAPSHOT_SCHEMA,
-  type LeaderboardResponse,
-  type RawSnapshot,
-  type SnapshotResponse,
-} from '@flr/core';
+import { carryForwardProfile, diffProfileFacts, extractProfileFacts, scoreProfile, type LeaderboardResponse, type SnapshotResponse } from '@flr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
-import { gunzipLimited, gzip, safeJson, TooLarge } from './json';
+import { gunzipLimited, gzip, TooLarge } from './json';
 import { reporterLimits } from './limits';
+import { cleanSnapshot } from './snapshot';
 
 const MAX_BYTES = 25 * 1024 * 1024;
 const DAILY_LIMIT = 200; // snapshots + reports per reporter per day
@@ -40,20 +33,15 @@ accounts.post('/api/snapshots', async (c) => {
   const report = c.req.query('report') === '1';
 
   // Accept plain or gzipped JSON.
-  let snap: RawSnapshot;
+  let raw: unknown;
   try {
     const json = isGzip(body) ? await gunzipLimited(body, MAX_BYTES) : body;
-    snap = JSON.parse(new TextDecoder().decode(json));
+    raw = JSON.parse(new TextDecoder().decode(json));
   } catch (e) {
     return e instanceof TooLarge ? c.json({ error: 'too_large' }, 413) : c.json({ error: 'bad_json' }, 400);
   }
-  if (snap?.schema !== SNAPSHOT_SCHEMA || typeof snap.slug !== 'string' || !snap.payloads || typeof snap.payloads !== 'object') {
-    return c.json({ error: 'bad_snapshot' }, 400);
-  }
-  snap.errors ??= {};
-  // Mutual connections are relative to whoever captured the profile: not a
-  // fact about the account, so they're neither stored nor scored here.
-  delete snap.payloads.profilePageMutualCount;
+  const snap = cleanSnapshot(raw);
+  if (!snap) return c.json({ error: 'bad_snapshot' }, 400);
 
   const now = Date.now();
   const capturedAt = Number.isFinite(snap.capturedAt) ? Math.min(snap.capturedAt, now) : now;
@@ -71,10 +59,12 @@ accounts.post('/api/snapshots', async (c) => {
   if (!snapCd.ok && !report) return c.json({ error: 'captured_recently' }, 429);
 
   const store = createAccountStore(c.env.DB);
-  const score = scoreProfile(facts, capturedAt);
-  const prev = await store.latest(memberId);
-  // A backfilled (older) snapshot is stored but doesn't produce a change list.
-  const changes = prev && prev.capturedAt <= capturedAt ? diffProfileFacts(prev.facts, facts) : [];
+  const prev = await store.current(memberId);
+  // A backfilled (older) snapshot is stored as observed but doesn't move the account.
+  const newest = !prev || prev.capturedAt <= capturedAt;
+  const current = newest ? carryForwardProfile(prev?.facts ?? null, facts) : facts;
+  const score = scoreProfile(current, capturedAt);
+  const changes = newest && prev ? diffProfileFacts(prev.facts, current) : [];
 
   if (snapCd.ok || !prev) {
     const r2Key = `snapshots/${memberId}/${new Date(capturedAt).toISOString()}-${limits.ipHash.slice(0, 8)}.json.gz`;
@@ -83,7 +73,7 @@ accounts.post('/api/snapshots', async (c) => {
       httpMetadata: { contentType: 'application/json', contentEncoding: 'gzip' },
       customMetadata: { slug: facts.slug ?? '', schema: String(snap.schema) },
     });
-    await store.addSnapshot({ facts: { ...facts, memberId }, score, changes, r2Key, capturedAt, ipHash: limits.ipHash });
+    await store.addSnapshot({ facts: { ...facts, memberId }, current, score, changes, r2Key, capturedAt, ipHash: limits.ipHash });
     await snapCd.commit();
   }
   if (reportCd) {
@@ -112,12 +102,6 @@ accounts.get('/api/accounts', async (c) => {
 accounts.get('/api/accounts/:memberId{[0-9]+}', (c) => accountResponse(c, Number(c.req.param('memberId'))));
 
 async function accountResponse(c: Context<{ Bindings: Env }>, memberId: number) {
-  const data = await createAccountStore(c.env.DB).getAccount(memberId);
-  if (!data) return c.json({ error: 'not_found' }, 404);
-  return c.json({
-    account: data.account,
-    slugs: data.slugs,
-    reports: data.reports,
-    snapshots: data.snapshots.map(({ changes_json, ...s }) => ({ ...s, changes: safeJson(changes_json, []) })),
-  });
+  const account = await createAccountStore(c.env.DB).getAccount(memberId);
+  return account ? c.json(account) : c.json({ error: 'not_found' }, 404);
 }

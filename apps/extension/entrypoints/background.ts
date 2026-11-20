@@ -1,6 +1,6 @@
 // Background: the toolbar toggle, and routing for the scam-check feature.
 
-import type { LeaderboardResponse } from '@flr/core';
+import type { LeaderboardResponse } from '@flr/core/wire';
 import { api } from '@/lib/api';
 import { serve } from '@/lib/runtime';
 import type { AppMessages } from '@/lib/scan/messages';

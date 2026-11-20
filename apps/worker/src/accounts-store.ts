@@ -1,7 +1,7 @@
 // D1 storage for accounts (keyed by member ID): their snapshot history, slug
 // history, and reports.
 
-import type { FactChange, LeaderboardRow, ProfileFacts, RiskLevel, Score } from '@flr/core';
+import { carryForwardProfile, type AccountResponse, type FactChange, type LeaderboardRow, type ProfileFacts, type RiskLevel, type Score } from '@flr/core';
 import { safeJson } from './json';
 
 export interface AccountRow {
@@ -43,7 +43,10 @@ export interface SnapshotRow {
 }
 
 export interface NewSnapshot {
+  /** What this capture observed: stored as the snapshot. */
   facts: ProfileFacts & { memberId: number };
+  /** The account's facts after this capture (failed parts carried forward): the current columns. */
+  current: ProfileFacts;
   score: Score;
   changes: FactChange[];
   r2Key: string;
@@ -51,22 +54,41 @@ export interface NewSnapshot {
   ipHash: string;
 }
 
+interface LeaderboardDbRow {
+  member_id: number;
+  slug: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  headline: string | null;
+  score: number;
+  level: string;
+  reports: number;
+  last_reported: number;
+}
+
 const bool = (b: boolean | null | undefined) => (b == null ? null : b ? 1 : 0);
 
 export function createAccountStore(db: D1Database) {
   return {
-    /** The newest stored snapshot's facts and capture time. */
-    async latest(memberId: number): Promise<{ facts: ProfileFacts; capturedAt: number } | null> {
-      const row = await db
-        .prepare(`SELECT facts_json, captured_at FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 1`)
+    /**
+     * What the account looks like now: the newest snapshots' facts, with parts
+     * a capture failed to load carried forward from earlier ones.
+     */
+    async current(memberId: number): Promise<{ facts: ProfileFacts; capturedAt: number } | null> {
+      const rows = await db
+        .prepare(`SELECT facts_json, captured_at FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 10`)
         .bind(memberId)
-        .first<{ facts_json: string; captured_at: number }>();
-      const facts = row ? safeJson<ProfileFacts | null>(row.facts_json, null) : null;
-      return facts ? { facts, capturedAt: row!.captured_at } : null;
+        .all<{ facts_json: string; captured_at: number }>();
+      let facts: ProfileFacts | null = null;
+      for (const row of rows.results.reverse()) {
+        const next = safeJson<ProfileFacts | null>(row.facts_json, null);
+        if (next) facts = carryForwardProfile(facts, next);
+      }
+      return facts ? { facts, capturedAt: rows.results.at(-1)!.captured_at } : null;
     },
 
     async addSnapshot(s: NewSnapshot): Promise<void> {
-      const f = s.facts;
+      const f = s.current;
       const current = [
         f.profileId, f.slug, f.firstName, f.lastName, f.headline, f.countryCode, f.geoName, f.industry,
         f.joined?.at ?? null, f.joined?.source ?? null, f.connections?.count ?? null, f.connections ? bool(f.connections.capped) : null,
@@ -90,7 +112,7 @@ export function createAccountStore(db: D1Database) {
                last_captured_at = MAX(accounts.last_captured_at, excluded.last_captured_at),
                snapshot_count = accounts.snapshot_count + 1`,
           )
-          .bind(f.memberId, ...current, s.capturedAt, s.capturedAt),
+          .bind(s.facts.memberId, ...current, s.capturedAt, s.capturedAt),
         db
           .prepare(
             `UPDATE accounts SET
@@ -102,19 +124,25 @@ export function createAccountStore(db: D1Database) {
                premium = ?, photo_uploaded_at = ?, position_count = ?, score = ?, level = ?, score_version = ?, version_tag = ?
              WHERE member_id = ? AND last_captured_at = ?`,
           )
-          .bind(...current, f.memberId, s.capturedAt),
+          .bind(...current, s.facts.memberId, s.capturedAt),
         db
           .prepare(
             `INSERT INTO account_snapshots (member_id, captured_at, r2_key, version_tag, score, facts_json, signals_json, changes_json, ip_hash)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
-          .bind(f.memberId, s.capturedAt, s.r2Key, f.versionTag, s.score.score, JSON.stringify(f), JSON.stringify(s.score), JSON.stringify(s.changes), s.ipHash),
-        db
-          .prepare(
-            `INSERT INTO account_slugs (member_id, slug, first_seen, last_seen) VALUES (?, ?, ?, ?)
-             ON CONFLICT(member_id, slug) DO UPDATE SET last_seen = MAX(account_slugs.last_seen, excluded.last_seen)`,
-          )
-          .bind(f.memberId, (f.slug ?? '').toLowerCase(), s.capturedAt, s.capturedAt),
+          .bind(s.facts.memberId, s.capturedAt, s.r2Key, s.facts.versionTag, s.score.score, JSON.stringify(s.facts), JSON.stringify(s.score), JSON.stringify(s.changes), s.ipHash),
+        ...(s.facts.slug
+          ? [
+              db
+                .prepare(
+                  `INSERT INTO account_slugs (member_id, slug, first_seen, last_seen) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(member_id, slug) DO UPDATE SET
+                     first_seen = MIN(account_slugs.first_seen, excluded.first_seen),
+                     last_seen = MAX(account_slugs.last_seen, excluded.last_seen)`,
+                )
+                .bind(s.facts.memberId, s.facts.slug.toLowerCase(), s.capturedAt, s.capturedAt),
+            ]
+          : []),
       ]);
     },
 
@@ -144,7 +172,7 @@ export function createAccountStore(db: D1Database) {
              LIMIT ?`,
           )
           .bind(limit)
-          .all<Record<string, any>>(),
+          .all<LeaderboardDbRow>(),
         db
           .prepare(`SELECT COUNT(*) AS reports, COUNT(DISTINCT member_id) AS accounts FROM account_reports`)
           .first<{ reports: number; accounts: number }>(),
@@ -153,7 +181,7 @@ export function createAccountStore(db: D1Database) {
         stats: { reports: Number(stats?.reports ?? 0), accounts: Number(stats?.accounts ?? 0) },
         rows: rows.results.map((r) => ({
           memberId: Number(r.member_id),
-          url: r.slug ? `https://www.linkedin.com/in/${r.slug}/` : `https://www.linkedin.com/`,
+          url: r.slug ? `https://www.linkedin.com/in/${encodeURIComponent(r.slug)}/` : `https://www.linkedin.com/`,
           slug: r.slug,
           name: [r.first_name, r.last_name].filter(Boolean).join(' ') || r.slug || `Member ${r.member_id}`,
           headline: r.headline,
@@ -165,9 +193,9 @@ export function createAccountStore(db: D1Database) {
       };
     },
 
-    async getAccount(memberId: number) {
-      const account = await db.prepare(`SELECT * FROM accounts WHERE member_id = ?`).bind(memberId).first<AccountRow>();
-      if (!account) return null;
+    async getAccount(memberId: number): Promise<AccountResponse | null> {
+      const a = await db.prepare(`SELECT * FROM accounts WHERE member_id = ?`).bind(memberId).first<AccountRow>();
+      if (!a) return null;
       const [slugs, snapshots, reports] = await Promise.all([
         db
           .prepare(`SELECT slug, first_seen, last_seen FROM account_slugs WHERE member_id = ? ORDER BY first_seen`)
@@ -182,7 +210,31 @@ export function createAccountStore(db: D1Database) {
           .all<SnapshotRow>(),
         db.prepare(`SELECT COUNT(*) AS n FROM account_reports WHERE member_id = ?`).bind(memberId).first<{ n: number }>(),
       ]);
-      return { account, slugs: slugs.results, snapshots: snapshots.results, reports: Number(reports?.n ?? 0) };
+      const flag = (n: number | null) => (n == null ? null : n === 1);
+      return {
+        memberId: a.member_id,
+        profileId: a.profile_id,
+        slug: a.slug,
+        name: [a.first_name, a.last_name].filter(Boolean).join(' ') || null,
+        headline: a.headline,
+        location: a.geo_name,
+        industry: a.industry,
+        joined: a.joined_at != null ? { at: a.joined_at, source: a.joined_source === 'about' ? 'about' : 'memberId' } : null,
+        connections: a.connections != null ? { count: a.connections, capped: a.connections_capped === 1 } : null,
+        followers: a.followers,
+        postCount: a.post_count,
+        lastActivityAt: a.last_activity_at,
+        verified: flag(a.verified),
+        score: a.score,
+        level: a.level as RiskLevel,
+        scoreVersion: a.score_version,
+        firstCapturedAt: a.first_captured_at,
+        lastCapturedAt: a.last_captured_at,
+        snapshotCount: a.snapshot_count,
+        reports: Number(reports?.n ?? 0),
+        slugs: slugs.results.map((x) => ({ slug: x.slug, firstSeen: x.first_seen, lastSeen: x.last_seen })),
+        snapshots: snapshots.results.map((x) => ({ id: x.id, capturedAt: x.captured_at, score: x.score, changes: safeJson<FactChange[]>(x.changes_json, []) })),
+      };
     },
 
     async memberIdForSlug(slug: string): Promise<number | null> {

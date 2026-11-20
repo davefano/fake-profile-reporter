@@ -1,23 +1,27 @@
 import { expect, test } from 'bun:test';
-import { normalizeProfileUrl } from '../src/linkedin/url';
+import { linkedInTarget } from '../src/linkedin/target';
+import { sameSite, siteDomain } from '../src/linkedin/url';
 
 test.each([
-  ['https://www.linkedin.com/in/Jane-Doe/', 'jane-doe', 'Jane-Doe'],
-  ['https://www.linkedin.com/in/jane-doe?trk=abc', 'jane-doe', 'jane-doe'],
-  ['linkedin.com/in/jane-doe', 'jane-doe', 'jane-doe'],
-  ['https://m.linkedin.com/in/jane-doe', 'jane-doe', 'jane-doe'],
-  ['https://www.linkedin.com/en/in/jane-doe/details/experience/', 'jane-doe', 'jane-doe'],
-])('normalizes %s', (input, slug, handle) => {
-  expect(normalizeProfileUrl(input)).toEqual({ url: `https://www.linkedin.com/in/${slug}`, handle });
+  ['https://www.linkedin.com/in/Jane-Doe/', 'Jane-Doe'],
+  ['https://www.linkedin.com/in/jane-doe?trk=abc', 'jane-doe'],
+  ['https://m.linkedin.com/in/jane-doe', 'jane-doe'],
+  ['https://uk.linkedin.com/in/jane-doe', 'jane-doe'],
+  ['https://www.linkedin.com/en/in/jane-doe/details/experience/', 'jane-doe'],
+])('profile target from %s', (input, slug) => {
+  expect(linkedInTarget(input)).toEqual({ kind: 'profile', slug });
 });
 
-test.each([
-  [''],
-  [null],
-  ['https://example.com/in/jane'],
-  ['https://evil-linkedin.com/in/jane'],
-  ['https://www.linkedin.com/company/acme'],
-  ['https://www.linkedin.com/in/'],
-])('rejects %p', (input) => {
-  expect(normalizeProfileUrl(input)).toBeNull();
+test.each([[''], [null], ['https://example.com/in/jane'], ['https://evil-linkedin.com/in/jane'], ['https://www.linkedin.com/in/'], ['https://www.linkedin.com/feed/']])(
+  'no target for %p',
+  (input) => {
+    expect(linkedInTarget(input)).toBeNull();
+  },
+);
+
+test('domains', () => {
+  expect(siteDomain('https://www.Example.co.uk/careers')).toBe('example.co.uk');
+  expect(siteDomain('example.com')).toBe('example.com');
+  expect(sameSite('jobs.example.com', 'example.com')).toBe(true);
+  expect(sameSite('example-hr.net', 'example.com')).toBe(false);
 });

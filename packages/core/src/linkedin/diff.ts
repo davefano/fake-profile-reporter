@@ -6,6 +6,14 @@ import type { CompanyFacts } from './company/facts';
 import type { JobFacts } from './job/facts';
 import type { ProfileFacts } from './profile/facts';
 
+/** A short, stable digest of a job description, so history needn't keep the text (it can be 30 KB). */
+export function compactJobFacts(job: JobFacts): JobFacts {
+  if (job.description.startsWith('digest:')) return job;
+  let h = 5381;
+  for (let i = 0; i < job.description.length; i++) h = ((h << 5) + h + job.description.charCodeAt(i)) | 0;
+  return { ...job, description: `digest:${(h >>> 0).toString(36)}:${job.description.length}` };
+}
+
 export interface FactChange {
   field: string;
   from: unknown;
@@ -47,6 +55,7 @@ export function diffCompanyFacts(prev: CompanyFacts, next: CompanyFacts): FactCh
 
 const JOB_FIELDS: Array<keyof JobFacts & string> = ['title', 'company', 'location', 'salary', 'apply', 'description'];
 
+/** Descriptions are compared by digest, so either side may be compacted. */
 export function diffJobFacts(prev: JobFacts, next: JobFacts): FactChange[] {
-  return diffFields(prev, next, JOB_FIELDS);
+  return diffFields(compactJobFacts(prev), compactJobFacts(next), JOB_FIELDS);
 }

@@ -205,6 +205,31 @@ export function parseMutual(text: string | null | undefined): number | null {
   return named + others || null;
 }
 
+/**
+ * The latest observation, with parts that failed to load filled in from the
+ * previous one: what to compare the next capture with, and what to show as
+ * current. A failed request is not an edit.
+ */
+export function carryForwardProfile(prev: ProfileFacts | null, next: ProfileFacts): ProfileFacts {
+  if (!prev) return next;
+  const out = { ...next };
+  if (!next.profileLoaded && prev.profileLoaded) {
+    for (const k of PROFILE_RECORD_FIELDS) (out as any)[k] = prev[k];
+    out.profileLoaded = true;
+  }
+  out.about ??= prev.about;
+  out.connections ??= prev.connections;
+  out.followers ??= prev.followers;
+  out.activity ??= prev.activity;
+  return out;
+}
+
+/** Fields that come from the full profile record (present only when profileLoaded). */
+export const PROFILE_RECORD_FIELDS = [
+  'firstName', 'lastName', 'headline', 'summary', 'countryCode', 'geoName', 'industry', 'premium', 'creator',
+  'influencer', 'memorialized', 'photo', 'photoUrl', 'background', 'positions', 'educations', 'skills', 'versionTag',
+] as const satisfies ReadonlyArray<keyof ProfileFacts>;
+
 /** The profile entity in the slug-resolve payload. */
 export function resolvedProfile(resolve: unknown): { entityUrn: string; versionTag?: string } | undefined {
   return (resolve as any)?.included?.find((e: any) => e?.entityUrn?.startsWith('urn:li:fsd_profile:'));

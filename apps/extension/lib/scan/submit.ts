@@ -3,7 +3,7 @@
 // companies and jobs it re-scores the facts we send (it can't fetch LinkedIn
 // pages itself), after checking their shape.
 
-import type { EntityRequest, EntityResponse, SnapshotResponse } from '@flr/core';
+import type { EntityRequest, EntityResponse, SnapshotResponse } from '@flr/core/wire';
 import { api } from '@/lib/api';
 import { isError } from '@/lib/runtime';
 import type { SubmitResponse } from './messages';

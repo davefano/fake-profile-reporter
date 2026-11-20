@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import type { AccountResponse } from '@flr/core/wire';
 import { fakeSnapshot } from '@flr/core/test/fixtures';
 import app from '../src/index';
 import type { Env } from '../src/env';
@@ -10,6 +11,10 @@ let env: Env & { SNAPSHOTS: ReturnType<typeof createTestR2> };
 beforeEach(() => {
   env = { DB: createTestD1(), RATE_KV: createTestKv(), SNAPSHOTS: createTestR2(), IP_SALT: 'test' };
 });
+
+async function account(memberId: number): Promise<AccountResponse> {
+  return (await (await app.request(`/api/accounts/${memberId}`, {}, env)).json()) as AccountResponse;
+}
 
 function post(body: unknown, { gzip = false, ip = '1.1.1.1', report = false } = {}) {
   const json = JSON.stringify(body);
@@ -38,12 +43,11 @@ describe('POST /api/snapshots', () => {
     const raw = JSON.parse(gunzipSync(obj.body).toString('utf8'));
     expect(raw.slug).toBe('jordan-sample-0a1b2c');
 
-    const acct = (await (await app.request('/api/accounts/700000001', {}, env)).json()) as any;
-    expect(acct.account.joined_source).toBe('about');
-    expect(acct.account.connections).toBe(500);
-    expect(acct.account.connections_capped).toBe(1);
-    expect(acct.account.verified).toBe(0);
-    expect(acct.account.snapshot_count).toBe(1);
+    const acct = await account(700_000_001);
+    expect(acct.joined?.source).toBe('about');
+    expect(acct.connections).toEqual({ count: 500, capped: true });
+    expect(acct.verified).toBe(false);
+    expect(acct.snapshotCount).toBe(1);
   });
 
   test('plain JSON is accepted and stored gzipped', async () => {
@@ -58,11 +62,11 @@ describe('POST /api/snapshots', () => {
     const data = (await res.json()) as any;
     expect(data.changes.map((c: any) => c.field).sort()).toEqual(['headline', 'slug']);
 
-    const byOldSlug = (await (await app.request('/api/accounts?slug=FIRST-SLUG', {}, env)).json()) as any;
-    expect(byOldSlug.account.slug).toBe('second-slug');
-    expect(byOldSlug.slugs.map((s: any) => s.slug)).toEqual(['first-slug', 'second-slug']);
-    expect(byOldSlug.account.snapshot_count).toBe(2);
-    expect(byOldSlug.snapshots[0].changes).toHaveLength(2);
+    const byOldSlug = (await (await app.request('/api/accounts?slug=FIRST-SLUG', {}, env)).json()) as AccountResponse;
+    expect(byOldSlug.slug).toBe('second-slug');
+    expect(byOldSlug.slugs.map((x) => x.slug)).toEqual(['first-slug', 'second-slug']);
+    expect(byOldSlug.snapshotCount).toBe(2);
+    expect(byOldSlug.snapshots[0]!.changes).toHaveLength(2);
   });
 
   test('rejects bad input', async () => {
@@ -80,17 +84,45 @@ describe('POST /api/snapshots', () => {
     await post(fakeSnapshot({ slug: 'new-slug', capturedAt: Date.UTC(2026, 10, 1) }), { ip: '1.1.1.1' });
     const late = (await (await post(fakeSnapshot({ slug: 'old-slug', capturedAt: Date.UTC(2026, 8, 1) }), { ip: '2.2.2.2' })).json()) as any;
     expect(late.changes).toEqual([]);
-    const got = (await (await app.request('/api/accounts/700000001', {}, env)).json()) as any;
-    expect(got.account.slug).toBe('new-slug');
-    expect(got.account.last_captured_at).toBe(Date.UTC(2026, 10, 1));
-    expect(got.account.first_captured_at).toBe(Date.UTC(2026, 8, 1));
-    expect(got.account.snapshot_count).toBe(2);
+    const got = await account(700_000_001);
+    expect(got.slug).toBe('new-slug');
+    expect(got.lastCapturedAt).toBe(Date.UTC(2026, 10, 1));
+    expect(got.firstCapturedAt).toBe(Date.UTC(2026, 8, 1));
+    expect(got.snapshotCount).toBe(2);
+    expect(got.slugs.find((x) => x.slug === 'old-slug')?.firstSeen).toBe(Date.UTC(2026, 8, 1));
   });
 
   test('a gzip bomb is rejected before it is fully decompressed', async () => {
     const bomb = gzipSync(Buffer.alloc(26 * 1024 * 1024, 0x20));
     const res = await app.request('/api/snapshots', { method: 'POST', headers: { 'cf-connecting-ip': '1.1.1.1' }, body: bomb }, env);
     expect(res.status).toBe(413);
+  });
+
+  test('a capture whose full profile failed keeps the account facts, and later changes still show', async () => {
+    await post(fakeSnapshot({ firstName: 'Alex', headline: 'Engineer', capturedAt: Date.UTC(2026, 9, 1) }), { ip: '1.1.1.1' });
+    const partial = fakeSnapshot({ firstName: 'Alex', capturedAt: Date.UTC(2026, 9, 15) });
+    delete partial.payloads.fullProfile;
+    partial.errors.fullProfile = 'HTTP 500';
+    expect((await post(partial, { ip: '2.2.2.2' })).status).toBe(201);
+    let got = await account(700_000_001);
+    expect(got.name).toBe('Alex Sample');
+    expect(got.headline).toBe('Engineer');
+
+    const later = (await (await post(fakeSnapshot({ firstName: 'Alex', headline: 'CEO', capturedAt: Date.UTC(2026, 10, 1) }), { ip: '3.3.3.3' })).json()) as any;
+    expect(later.changes.map((c: any) => c.field)).toEqual(['headline']);
+    got = await account(700_000_001);
+    expect(got.headline).toBe('CEO');
+  });
+
+  test('uploads are cleaned: unknown and malformed payloads are dropped, never stored', async () => {
+    const snap: any = fakeSnapshot();
+    snap.payloads.profilePageMutual = 'Lara and David are mutual connections';
+    snap.payloads.profilePageCounts = 123;
+    snap.payloads.extra = { anything: true };
+    expect((await post(snap, { gzip: true })).status).toBe(201);
+    const [, obj] = [...env.SNAPSHOTS.objects][0]!;
+    const stored = JSON.parse(gunzipSync(obj.body).toString('utf8'));
+    expect(Object.keys(stored.payloads).sort()).toEqual(['about', 'activity', 'followingState', 'fullProfile', 'resolve']);
   });
 
   test('mutual connections are neither stored nor scored', async () => {
@@ -122,9 +154,9 @@ describe('reports', () => {
     expect((await post(fakeSnapshot())).status).toBe(201); // Track
     expect((await post(fakeSnapshot(), { report: true })).status).toBe(201); // then Report
     expect((await post(fakeSnapshot(), { report: true })).status).toBe(429);
-    const got = (await (await app.request('/api/accounts/700000001', {}, env)).json()) as any;
+    const got = await account(700_000_001);
     expect(got.reports).toBe(1);
-    expect(got.account.snapshot_count).toBe(1);
+    expect(got.snapshotCount).toBe(1);
   });
 });
 
