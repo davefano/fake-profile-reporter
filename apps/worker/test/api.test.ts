@@ -21,8 +21,7 @@ test('unknown routes 404 and CORS preflight is allowed', async () => {
   expect(pre.headers.get('access-control-allow-origin')).toBe('*');
 });
 
-test('the leaderboard page is served', async () => {
-  const res = await app.request('/', {}, env);
-  expect(res.status).toBe(200);
-  expect(await res.text()).toContain('/api/leaderboard');
+test('there is no public web page, only the API', async () => {
+  expect((await app.request('/', {}, env)).status).toBe(404);
+  expect((await app.request('/leaderboard', {}, env)).status).toBe(404);
 });

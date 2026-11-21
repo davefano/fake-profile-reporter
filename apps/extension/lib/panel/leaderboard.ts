@@ -1,4 +1,4 @@
-// The Leaderboard tab: reported profiles from the directory.
+// The Reports tab: profiles reported to the server saves go to.
 
 import type { LeaderboardRow } from '@flr/core/wire';
 import { isError } from '@/lib/runtime';
@@ -17,11 +17,11 @@ export async function loadLeaderboard(list: HTMLElement) {
   const res = await sendMessage<'FLR_LEADERBOARD'>({ type: 'FLR_LEADERBOARD' }).catch(() => undefined);
   const rows: LeaderboardRow[] | undefined = res && !isError(res) ? res.rows : undefined;
   if (!rows) {
-    list.innerHTML = `<div class="empty"><h2>Leaderboard unavailable</h2><p>${esc(res && isError(res) ? (res.message ?? res.error) : 'Could not load it.')}</p></div>`;
+    list.innerHTML = `<div class="empty"><h2>Reports unavailable</h2><p>${esc(res && isError(res) ? (res.message ?? res.error) : 'Could not load it.')}</p></div>`;
     return;
   }
   if (!rows.length) {
-    list.innerHTML = '<div class="empty"><h2>No reports yet</h2><p>Profiles you report show up here.</p></div>';
+    list.innerHTML = '<div class="empty"><h2>No reports yet</h2><p>Profiles reported to this server show up here.</p></div>';
     return;
   }
   list.innerHTML = `<ol class="board">${rows

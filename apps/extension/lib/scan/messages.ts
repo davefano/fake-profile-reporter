@@ -6,6 +6,7 @@ import type { Score } from '@flr/core/scam';
 import type { LeaderboardResponse } from '@flr/core/wire';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
 import { send, type ErrorResponse } from '@/lib/runtime';
+import type { UploadResult } from '@/lib/saves/upload';
 
 /** Local history the panel shows next to any scan. */
 interface History {
@@ -51,15 +52,22 @@ export const targetKey = (t: LinkedInTarget) => `${t.kind}:${t.kind === 'job' ? 
 export const scanKey = (r: ScanResult) => targetKey(r.kind === 'job' ? { kind: 'job', id: r.id } : { kind: r.kind, slug: r.slug });
 
 export type ScanResponse = ScanResult | ErrorResponse;
-/** On success, the directory's own score (it can differ from the panel's: see scoreProfile's mutual connections). */
-export type SubmitResponse = { ok: true; reported: boolean; score: number } | ErrorResponse;
+/**
+ * Saved in this browser, and on the server when one is set. `server.score` is
+ * the server's own score (it can differ from the panel's: see scoreProfile's
+ * mutual connections). An error after the local save says so in `savedLocally`.
+ */
+export type SubmitResponse = { ok: true; reported: boolean; server: { score: number } | null } | (ErrorResponse & { savedLocally?: boolean });
 
 export interface AppMessages {
   /** Scan the active tab's profile, company, or job. */
   FLR_SCAN: { req: { type: 'FLR_SCAN'; force?: boolean }; res: ScanResponse };
-  /** Save to the directory, optionally reporting it. `key` is scanKey(). */
+  /** Save it (see Settings › Save to), optionally reporting it. `key` is scanKey(). */
   FLR_SUBMIT: { req: { type: 'FLR_SUBMIT'; key: string; report: boolean }; res: SubmitResponse };
+  /** Reported profiles on the server saves go to. */
   FLR_LEADERBOARD: { req: { type: 'FLR_LEADERBOARD' }; res: LeaderboardResponse | ErrorResponse };
+  /** Send saves the server doesn't have yet. */
+  FLR_UPLOAD: { req: { type: 'FLR_UPLOAD' }; res: UploadResult | ErrorResponse };
 }
 
 export const sendMessage = <K extends keyof AppMessages>(msg: AppMessages[K]['req']) => send<AppMessages, K>(msg);

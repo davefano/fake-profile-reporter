@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from './env';
-import { leaderboardHtml } from './leaderboard-page';
 import { accounts } from './accounts';
 import { entities } from './entities';
 
@@ -20,8 +19,5 @@ app.get('/api/health', (c) => c.json({ ok: true }));
 
 app.route('/', accounts);
 app.route('/', entities);
-
-app.get('/', (c) => c.html(leaderboardHtml()));
-app.get('/leaderboard', (c) => c.html(leaderboardHtml()));
 
 export default app;

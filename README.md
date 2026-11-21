@@ -4,9 +4,9 @@ A crowd-sourced "is this LinkedIn profile fake?" tool. Open source (MIT).
 
 - **Browser extension** (Chrome, Firefox, Safari via [WXT](https://wxt.dev)) —
   grades the LinkedIn profile you're viewing with rule-based signals and lets
-  you report it.
+  you save or report it, in your browser or to a server.
 - **API** ([Hono](https://hono.dev) on Cloudflare Workers + D1/SQLite) —
-  stores reports and serves a public leaderboard.
+  stores reports for the extension. It has no public web page.
 
 ## Project layout
 
@@ -26,7 +26,6 @@ apps/worker/           the API (Hono on Cloudflare Workers)
   src/accounts.ts      profile snapshots, reports, accounts, leaderboard
   src/entities.ts      company pages and job postings
   src/limits.ts        per-reporter rate limits (salted IP hash)
-  src/leaderboard-page.ts   server-rendered leaderboard page
   schema.sql           database schema
   test/                API tests (real schema on bun:sqlite)
 apps/extension/        the browser extension (WXT)
@@ -36,6 +35,7 @@ apps/extension/        the browser extension (WXT)
   entrypoints/popup/          Safari popup (Safari has no sidebar API)
   lib/linkedin/               reusable LinkedIn bridge and client (no feature logic)
   lib/scan/                   the scam check: scan, history, submit, its messages
+  lib/saves/                  where saves go: settings, the in-browser store, uploads
   lib/panel/                  the UI, shared by side panel and popup
 ```
 
@@ -72,11 +72,18 @@ Builds land in `apps/extension/.output/`. To load one manually, use
 **Safari** needs a Mac with Xcode: build with `bun run --cwd apps/extension build:safari`,
 then wrap it with `xcrun safari-web-extension-converter apps/extension/.output/safari-mv2`.
 
-**Pointing the extension at another server:** the API URL is set at build time.
+**Where saves go** is a setting in the panel (gear icon › Save to):
 
-```bash
-WXT_API_BASE=https://your-worker.workers.dev bun run build:ext
-```
+- **Just me** (default): saves stay in the browser's extension storage. Nothing is sent.
+- **Community**: saves also go to the shared database. Its address is
+  `COMMUNITY_URL` in `apps/extension/lib/config.ts`; the option shows as not set
+  up while that is null.
+- **My own server**: any copy of the worker, e.g. `bun run dev:api` on a
+  machine you can reach. The extension asks for permission to reach it.
+
+Track and Report always keep a copy in the browser. Settings › Your saves
+exports them as one JSON file and imports such a file back, and offers once per
+server to upload saves made before it was connected.
 
 ## API
 

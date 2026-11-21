@@ -74,7 +74,7 @@ function signalsBlock(s: Score) {
 }
 
 function actions(r: ScanResult) {
-  const track = `Save this ${NOUN[r.kind]} to the shared directory, without reporting it`;
+  const track = `Save this ${NOUN[r.kind]} without reporting it`;
   return `<div class="actions">
     <p class="status" id="submitStatus" role="status"></p>
     <div class="btn-row">

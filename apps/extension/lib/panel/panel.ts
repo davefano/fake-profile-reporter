@@ -1,11 +1,13 @@
 // The extension UI: mounting, state, and actions. Mounted by the Chrome side
 // panel, the Firefox sidebar, and the Safari popup (Safari has no sidebar API).
 
-import { API_BASE } from '@/lib/config';
 import { isError, type ErrorResponse } from '@/lib/runtime';
+import { destinationLabel, getSettings, onSettingsChanged, serverBase, type Settings } from '@/lib/saves/settings';
 import { linkedInTarget } from '@flr/core/linkedin';
-import { scanKey, sendMessage, targetKey, type ScanResult } from '@/lib/scan/messages';
+import { scanKey, sendMessage, targetKey, type ScanResult, type SubmitResponse } from '@/lib/scan/messages';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
+import { loadSaved } from './saved';
+import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
 import { renderResult } from './views';
 import './panel.css';
 
@@ -23,10 +25,14 @@ const MARKUP = `
     <button class="icon-btn" id="rescan" title="Scan again" aria-label="Scan again">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 10a6.5 6.5 0 1 1-2-4.7M16.5 3.5v3.8h-3.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
+    <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings" aria-pressed="false">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+    </button>
   </div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="scan" role="tab">This page</button>
-    <button class="tab" data-tab="board" role="tab">Leaderboard</button>
+    <button class="tab" data-tab="saved" role="tab">Saved</button>
+    <button class="tab" data-tab="board" role="tab" id="boardTab">Reports</button>
   </nav>
 </header>
 
@@ -67,9 +73,15 @@ const MARKUP = `
     <div id="result" class="hidden"></div>
   </section>
 
+  <section id="view-saved" class="view">
+    <div id="savedList"></div>
+  </section>
+
   <section id="view-board" class="view">
     <div id="boardList"></div>
   </section>
+
+  <section id="view-settings" class="view">${SETTINGS_MARKUP}</section>
 </main>
 `;
 
@@ -77,6 +89,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const STATES = ['state-loading', 'state-empty', 'state-error', 'result'] as const;
 
 let current: ScanResult | null = null;
+let settings: Settings | null = null;
 let scanSeq = 0;
 let lastKey: string | null = null;
 let loadingTimer: ReturnType<typeof setInterval> | undefined;
@@ -137,7 +150,7 @@ async function submit(report: boolean) {
   status.className = 'status';
   status.textContent = '';
 
-  const res = await sendMessage<'FLR_SUBMIT'>({ type: 'FLR_SUBMIT', key: scanKey(current), report }).catch((e): ErrorResponse => ({
+  const res: SubmitResponse = await sendMessage<'FLR_SUBMIT'>({ type: 'FLR_SUBMIT', key: scanKey(current), report }).catch((e): ErrorResponse => ({
     error: 'panel_error',
     message: String(e),
   }));
@@ -145,33 +158,60 @@ async function submit(report: boolean) {
     btn.textContent = report ? 'Reported ✓' : 'Tracked ✓';
     other.disabled = report; // can still report after tracking
     status.className = 'status ok';
-    // The directory scores without viewer-relative signals, so its number can differ.
-    const theirs = res.score !== current.score.score ? ` The directory scores it ${res.score}/100.` : '';
-    status.textContent = (report ? 'Reported and saved to the directory. Thank you.' : 'Saved to the shared directory.') + theirs;
+    if (!res.server) {
+      status.textContent = report ? 'Reported in this browser only. To share reports, change Save to in Settings.' : 'Saved in this browser.';
+      return;
+    }
+    // The server scores without viewer-relative signals, so its number can differ.
+    const where = settings ? destinationLabel(settings) : 'the server';
+    const theirs = res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
+    status.textContent = (report ? `Reported to ${where}. Thank you.` : `Saved to ${where}.`) + theirs;
     if (res.reported) invalidateLeaderboard();
     return;
   }
   btn.disabled = other.disabled = false;
   btn.textContent = label;
   status.className = 'status err';
+  if (res.savedLocally) {
+    btn.textContent = report ? 'Reported ✓' : 'Tracked ✓';
+    btn.disabled = true;
+    other.disabled = report;
+  }
   const MSG: Record<string, string> = {
     already_reported_recently: 'You reported this recently.',
     daily_limit_reached: 'Daily limit reached. Try again tomorrow.',
     captured_recently: 'This was saved a few minutes ago.',
     observed_recently: 'This was saved a few minutes ago.',
   };
-  status.textContent = MSG[res.error] ?? res.message ?? res.error;
+  const why = MSG[res.error] ?? res.message ?? res.error;
+  status.textContent = res.savedLocally ? `Saved in this browser, but not sent: ${why}` : why;
 }
 
 // --- mount -----------------------------------------------------------------------
+function showView(name: string) {
+  document.querySelectorAll<HTMLElement>('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + name));
+  $('settingsBtn').setAttribute('aria-pressed', String(name === 'settings'));
+  if (name === 'saved') loadSaved($('savedList'));
+  if (name === 'board') loadLeaderboard($('boardList'));
+  if (name === 'settings') refreshSettings();
+}
+
 function bindTabs() {
-  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + btn.dataset.tab));
-      if (btn.dataset.tab === 'board') loadLeaderboard($('boardList'));
-    });
-  });
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((btn) => btn.addEventListener('click', () => showView(btn.dataset.tab!)));
+  $('settingsBtn').addEventListener('click', () => showView($('view-settings').classList.contains('active') ? 'scan' : 'settings'));
+}
+
+/** Header and tabs follow Settings › Save to. */
+async function applySettings() {
+  settings = await getSettings();
+  const base = serverBase(settings);
+  // Safari shows this UI as a popup, not a side panel.
+  const surface = location.pathname.includes('popup') ? '' : 'Side Panel · ';
+  $('apiBase').textContent = surface + (base ? `Saving to ${destinationLabel(settings)}` : 'Just me');
+  $('boardTab').classList.toggle('hidden', !base);
+  if (!base && $('view-board').classList.contains('active')) showView('saved');
+  invalidateLeaderboard();
 }
 
 /** Follow the active tab: rescan when it lands on a different profile. */
@@ -221,14 +261,14 @@ async function announcePanel() {
 export async function mountPanel() {
   document.body.innerHTML = MARKUP;
   bindTabs();
+  bindSettings();
+  onSettingsChanged(applySettings);
+  await applySettings();
   $('rescan').addEventListener('click', () => scan(true));
   $('retry').addEventListener('click', () => scan(true));
   followTabs();
   announcePanel();
 
-  // Safari shows this UI as a popup, not a side panel.
-  const surface = location.pathname.includes('popup') ? '' : 'Side Panel · ';
-  $('apiBase').textContent = `${surface}${new URL(API_BASE).host}`;
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   const target = linkedInTarget(tab?.url);
   lastKey = target ? targetKey(target) : null;
