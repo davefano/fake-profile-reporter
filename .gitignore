@@ -16,7 +16,6 @@ coverage/
 .output/
 .wxt/
 web-ext.config.ts
-/docs/
 
 # Compound Engineering local scratch
 .context/compound-engineering/
