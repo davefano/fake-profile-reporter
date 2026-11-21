@@ -6,9 +6,10 @@ import { COMMUNITY_URL } from './lib/config';
 const ANY_SERVER = ['https://*/*', 'http://*/*'];
 
 export default defineConfig({
+  zip: { artifactTemplate: 'fake-linkedin-reporter-{{version}}-{{browser}}.zip', sourcesTemplate: 'fake-linkedin-reporter-{{version}}-sources.zip' },
   manifest: ({ browser, manifestVersion }) => ({
     name: 'Fake LinkedIn Reporter',
-    description: 'Checks LinkedIn profiles for signs of fake or scam accounts, in a side panel.',
+    description: 'Checks LinkedIn profiles, company pages and job postings for signs of fakes and scams, in a side panel.',
     // unlimitedStorage: saves keep each profile's raw snapshot for uploading later.
     permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting'],
     // *.linkedin.com: country subdomains (uk.linkedin.com) are read as public pages.
