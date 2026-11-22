@@ -25,8 +25,8 @@ import {
   type JobExtras,
   type ProfileFacts,
   type RawSnapshot,
-} from '@flr/core/linkedin';
-import { scoreCompany, scoreJob, scoreProfile, type Score } from '@flr/core/scam';
+} from '@fpr/core/linkedin';
+import { scoreCompany, scoreJob, scoreProfile, type Score } from '@fpr/core/scam';
 
 const ROOT = join(import.meta.dir, '../..');
 const SNAP_DIR = join(ROOT, '.data/snapshots');
@@ -119,8 +119,8 @@ async function inPage<T>(call: string): Promise<T> {
 // Signed-in extras through the browser session, for the core getters.
 const signedIn = flag('--signed-in')
   ? {
-      company: (slug: string) => inPage<CompanyExtras>(`__flrCompanyExtras(${JSON.stringify(slug)})`),
-      job: (id: string) => inPage<JobExtras>(`__flrJobExtras(${JSON.stringify(id)})`),
+      company: (slug: string) => inPage<CompanyExtras>(`__fprCompanyExtras(${JSON.stringify(slug)})`),
+      job: (id: string) => inPage<JobExtras>(`__fprJobExtras(${JSON.stringify(id)})`),
     }
   : undefined;
 const extrasLine = (label: string, x: object) => console.log(`   ${label}: ${JSON.stringify(x)}`);
@@ -183,7 +183,7 @@ for (const [n, target] of profileTargets.entries()) {
   if (n > 0) await Bun.sleep(DELAY_MS);
 
   const opts = JSON.stringify({ includeActivity: !flag('--no-activity') });
-  const snap = await inPage<RawSnapshot>(`__flrCapture(${JSON.stringify(slug)}, ${opts})`);
+  const snap = await inPage<RawSnapshot>(`__fprCapture(${JSON.stringify(slug)}, ${opts})`);
 
   const facts = extractProfileFacts(snap, snap.capturedAt);
   if (!facts.memberId) {

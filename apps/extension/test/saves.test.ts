@@ -90,10 +90,15 @@ describe('export and import', () => {
     expect(parseExport(exportFile(items))).toEqual({ items, skipped: 0 });
   });
 
+  test('reads exports made under the old name', () => {
+    const old = exportFile([item()]).replace('fake-profile-reporter/saves', 'fake-linkedin-reporter/saves');
+    expect(parseExport(old)).toEqual({ items: [item()], skipped: 0 });
+  });
+
   test('rejects other files and skips items that do not look right', () => {
     expect(() => parseExport('{nope')).toThrow("isn't JSON");
-    expect(() => parseExport('{"items":[]}')).toThrow("isn't a Fake LinkedIn Reporter export");
-    expect(() => parseExport(JSON.stringify({ format: 'fake-linkedin-reporter/saves', version: 2, items: [] }))).toThrow('newer version');
+    expect(() => parseExport('{"items":[]}')).toThrow("isn't a Fake Profile Reporter export");
+    expect(() => parseExport(JSON.stringify({ format: 'fake-profile-reporter/saves', version: 2, items: [] }))).toThrow('newer version');
     const bad = [
       item({ url: 'https://evil.example/company/x/' }),
       item({ url: 'javascript:alert(1)' }),

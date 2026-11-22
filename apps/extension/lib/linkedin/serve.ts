@@ -2,7 +2,7 @@
 // signed-in requests are same-origin and use the viewer's session. Stateless:
 // every answer is complete in itself.
 
-import { captureProfile, extractProfileFacts, fetchCompanyExtras, fetchJobExtras } from '@flr/core/linkedin';
+import { captureProfile, extractProfileFacts, fetchCompanyExtras, fetchJobExtras } from '@fpr/core/linkedin';
 import { errorText, serve, type ErrorResponse } from '@/lib/runtime';
 import type { LinkedInMessages, ProfileResult } from './protocol';
 
@@ -14,9 +14,9 @@ const opts = { fetch: pageFetch };
 export function serveLinkedIn() {
   // The background re-injects this script into tabs that predate the
   // extension; a second listener would run every read twice.
-  const g = globalThis as { __flrLinkedInServing?: boolean };
-  if (g.__flrLinkedInServing) return;
-  g.__flrLinkedInServing = true;
+  const g = globalThis as { __fprLinkedInServing?: boolean };
+  if (g.__fprLinkedInServing) return;
+  g.__fprLinkedInServing = true;
 
   serve<LinkedInMessages>({
     LI_PROFILE: (msg) => profile(msg.slug, msg.includeActivity, msg.includeSnapshot),

@@ -1,4 +1,4 @@
-# Fake LinkedIn Reporter agent index
+# Fake Profile Reporter agent index
 
 An open-source (MIT), crowd-sourced tool for spotting suspicious LinkedIn
 profiles, company pages and job postings: a WXT browser extension, a Hono API

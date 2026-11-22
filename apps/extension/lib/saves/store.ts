@@ -2,8 +2,8 @@
 // destination, with what's needed to upload it to a server later. Export and
 // Import move them between browsers as one JSON file.
 
-import type { RiskLevel } from '@flr/core/scam';
-import type { EntityRequest } from '@flr/core/wire';
+import type { RiskLevel } from '@fpr/core/scam';
+import type { EntityRequest } from '@fpr/core/wire';
 
 type EntityPayload = EntityRequest extends infer R ? (R extends unknown ? Omit<R, 'report'> : never) : never;
 /** What a server needs: a profile's raw snapshot (it re-parses it), or a company or job's facts. */
@@ -93,7 +93,9 @@ export const pendingFor = (items: SavedItem[], server: string) => items.filter((
 
 // --- Export / Import -----------------------------------------------------------
 
-const FORMAT = 'fake-linkedin-reporter/saves';
+const FORMAT = 'fake-profile-reporter/saves';
+/** Exports made before the rename. */
+const OLD_FORMATS = ['fake-linkedin-reporter/saves'];
 
 export function exportFile(items: SavedItem[], now = Date.now()) {
   return JSON.stringify({ format: FORMAT, version: 1, exportedAt: now, items }, null, 1);
@@ -108,7 +110,7 @@ export function parseExport(text: string): { items: SavedItem[]; skipped: number
     throw new Error("That file isn't JSON.");
   }
   const file = data as { format?: unknown; version?: unknown; items?: unknown };
-  if (!file || file.format !== FORMAT || !Array.isArray(file.items)) throw new Error("That file isn't a Fake LinkedIn Reporter export.");
+  if (!file || (file.format !== FORMAT && !OLD_FORMATS.includes(file.format as string)) || !Array.isArray(file.items)) throw new Error("That file isn't a Fake Profile Reporter export.");
   if (file.version !== 1) throw new Error('That export is from a newer version of the extension.');
   const items = file.items.filter(isSavedItem);
   return { items, skipped: file.items.length - items.length };

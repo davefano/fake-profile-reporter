@@ -9,7 +9,7 @@
 // score used, so the score can be reproduced.
 
 import { Hono } from 'hono';
-import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type EntityRecord, type EntityResponse, type JobExtras, type JobFacts, type Score } from '@flr/core';
+import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type EntityRecord, type EntityResponse, type JobExtras, type JobFacts, type Score } from '@fpr/core';
 import type { Env } from './env';
 import { safeJson } from './json';
 import { reporterLimits } from './limits';

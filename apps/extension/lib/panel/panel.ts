@@ -3,7 +3,7 @@
 
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { destinationLabel, getSettings, onSettingsChanged, serverBase, type Settings } from '@/lib/saves/settings';
-import { linkedInTarget } from '@flr/core/linkedin';
+import { linkedInTarget } from '@fpr/core/linkedin';
 import { scanKey, sendMessage, targetKey, type ScanResult, type SubmitResponse } from '@/lib/scan/messages';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
 import { loadSaved } from './saved';
@@ -19,7 +19,7 @@ const MARKUP = `
   <div class="brand">
     <span class="mark">${LOGO}</span>
     <div class="brand-text">
-      <div class="title">Fake LinkedIn Reporter</div>
+      <div class="title">Fake Profile Reporter</div>
       <div class="subtitle" id="apiBase">Side Panel</div>
     </div>
     <button class="icon-btn" id="rescan" title="Scan again" aria-label="Scan again">
@@ -110,7 +110,7 @@ async function scan(force = false) {
   const seq = ++scanSeq;
   showState('state-loading');
   $('rescan').classList.add('spinning');
-  const res = await sendMessage<'FLR_SCAN'>({ type: 'FLR_SCAN', force }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
+  const res = await sendMessage<'FPR_SCAN'>({ type: 'FPR_SCAN', force }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
   if (seq !== scanSeq) return; // a newer scan started
   $('rescan').classList.remove('spinning');
 
@@ -150,7 +150,7 @@ async function submit(report: boolean) {
   status.className = 'status';
   status.textContent = '';
 
-  const res: SubmitResponse = await sendMessage<'FLR_SUBMIT'>({ type: 'FLR_SUBMIT', key: scanKey(current), report }).catch((e): ErrorResponse => ({
+  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key: scanKey(current), report }).catch((e): ErrorResponse => ({
     error: 'panel_error',
     message: String(e),
   }));

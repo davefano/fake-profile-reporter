@@ -2,7 +2,7 @@
 // types we expect; anything else (including the old mutual-connections text,
 // which named the uploader's contacts) is dropped before storing or parsing.
 
-import { SNAPSHOT_SCHEMA, type RawSnapshot } from '@flr/core';
+import { SNAPSHOT_SCHEMA, type RawSnapshot } from '@fpr/core';
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 

@@ -2,10 +2,10 @@
 // LinkedIn data layer and the generic runtime, and nothing feature-specific.
 import { expect, test } from 'bun:test';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { imports, sourceFiles } from '@flr/core/test/source-files';
+import { imports, sourceFiles } from '@fpr/core/test/source-files';
 
 const DIR = join(import.meta.dir, '../lib/linkedin');
-const PACKAGES = [/^@flr\/core\/linkedin$/, /^@\/lib\/runtime$/];
+const PACKAGES = [/^@fpr\/core\/linkedin$/, /^@\/lib\/runtime$/];
 
 test('lib/linkedin imports only the LinkedIn layer, the runtime, and itself', () => {
   const offenders = sourceFiles(DIR).flatMap((f) =>

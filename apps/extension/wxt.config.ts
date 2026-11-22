@@ -6,21 +6,21 @@ import { COMMUNITY_URL } from './lib/config';
 const ANY_SERVER = ['https://*/*', 'http://*/*'];
 
 export default defineConfig({
-  zip: { artifactTemplate: 'fake-linkedin-reporter-{{version}}-{{browser}}.zip', sourcesTemplate: 'fake-linkedin-reporter-{{version}}-sources.zip' },
+  zip: { artifactTemplate: 'fake-profile-reporter-{{version}}-{{browser}}.zip', sourcesTemplate: 'fake-profile-reporter-{{version}}-sources.zip' },
   manifest: ({ browser, manifestVersion }) => ({
-    name: 'Fake LinkedIn Reporter',
+    name: 'Fake Profile Reporter',
     description: 'Checks LinkedIn profiles, company pages and job postings for signs of fakes and scams, in a side panel.',
     // unlimitedStorage: saves keep each profile's raw snapshot for uploading later.
     permissions: ['storage', 'unlimitedStorage', 'activeTab', 'scripting'],
     // *.linkedin.com: country subdomains (uk.linkedin.com) are read as public pages.
     host_permissions: ['https://*.linkedin.com/*', ...(COMMUNITY_URL ? [`${new URL(COMMUNITY_URL).origin}/*`] : [])],
     ...(manifestVersion === 3 ? { optional_host_permissions: ANY_SERVER } : { optional_permissions: ANY_SERVER }),
-    action: { default_title: 'Toggle Fake LinkedIn Reporter side panel' },
+    action: { default_title: 'Toggle Fake Profile Reporter side panel' },
     // Same toggle from the keyboard. Users can change it at chrome://extensions/shortcuts.
     commands: { _execute_action: { suggested_key: { default: 'Alt+Shift+L' }, description: 'Toggle the side panel' } },
     ...(browser === 'firefox' && {
       // TODO: replace with the real add-on ID before submitting to AMO.
-      browser_specific_settings: { gecko: { id: 'fake-linkedin-reporter@example.org' } },
+      browser_specific_settings: { gecko: { id: 'fake-profile-reporter@example.org' } },
     }),
   }),
 });

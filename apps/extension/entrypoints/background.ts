@@ -1,6 +1,6 @@
 // Background: the toolbar toggle, and routing for the scam-check feature.
 
-import type { LeaderboardResponse } from '@flr/core/wire';
+import type { LeaderboardResponse } from '@fpr/core/wire';
 import { api } from '@/lib/api';
 import { serve } from '@/lib/runtime';
 import { getSettings, serverBase } from '@/lib/saves/settings';
@@ -18,13 +18,13 @@ export default defineBackground({
   main() {
     setUpToolbarToggle();
     serve<AppMessages>({
-      FLR_SCAN: (msg) => scan(!!msg.force),
-      FLR_SUBMIT: (msg) => submit(msg.key, msg.report),
-      FLR_LEADERBOARD: async () => {
+      FPR_SCAN: (msg) => scan(!!msg.force),
+      FPR_SUBMIT: (msg) => submit(msg.key, msg.report),
+      FPR_LEADERBOARD: async () => {
         const base = serverBase(await getSettings());
         return base ? api<LeaderboardResponse>(base, 'GET', '/api/leaderboard?limit=50') : NO_SERVER;
       },
-      FLR_UPLOAD: async () => {
+      FPR_UPLOAD: async () => {
         const base = serverBase(await getSettings());
         return base ? uploadPending(base) : NO_SERVER;
       },

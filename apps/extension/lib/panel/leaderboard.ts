@@ -1,6 +1,6 @@
 // The Reports tab: profiles reported to the server saves go to.
 
-import type { LeaderboardRow } from '@flr/core/wire';
+import type { LeaderboardRow } from '@fpr/core/wire';
 import { isError } from '@/lib/runtime';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
@@ -14,7 +14,7 @@ export const invalidateLeaderboard = () => (boardLoaded = false);
 export async function loadLeaderboard(list: HTMLElement) {
   if (boardLoaded) return;
   list.innerHTML = '<div class="skel row"></div>'.repeat(5);
-  const res = await sendMessage<'FLR_LEADERBOARD'>({ type: 'FLR_LEADERBOARD' }).catch(() => undefined);
+  const res = await sendMessage<'FPR_LEADERBOARD'>({ type: 'FPR_LEADERBOARD' }).catch(() => undefined);
   const rows: LeaderboardRow[] | undefined = res && !isError(res) ? res.rows : undefined;
   if (!rows) {
     list.innerHTML = `<div class="empty"><h2>Reports unavailable</h2><p>${esc(res && isError(res) ? (res.message ?? res.error) : 'Could not load it.')}</p></div>`;

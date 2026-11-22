@@ -2,7 +2,7 @@
 // profiles it re-parses the raw snapshot; for companies and jobs it re-scores
 // the facts (it can't fetch LinkedIn pages), after checking their shape.
 
-import type { EntityResponse, SnapshotResponse } from '@flr/core/wire';
+import type { EntityResponse, SnapshotResponse } from '@fpr/core/wire';
 import { api } from '@/lib/api';
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { localSaves, pendingFor, type SavedItem } from './store';

@@ -1,9 +1,9 @@
 {
-  "name": "fake-linkedin-reporter",
+  "name": "fake-profile-reporter",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Crowd-sourced fake LinkedIn profile reporting: browser extension + API.",
+  "description": "Crowd-sourced reporting of fake profiles, starting with LinkedIn: browser extension + API.",
   "license": "MIT",
   "workspaces": [
     "packages/*",

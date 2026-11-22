@@ -1,7 +1,7 @@
 // HTML for a scan result. Pure functions of the scan; all text is escaped.
 
-import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@flr/core/linkedin';
-import type { RiskLevel, Score, Signal } from '@flr/core/scam';
+import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
+import type { RiskLevel, Score, Signal } from '@fpr/core/scam';
 import type { CompanyScan, JobScan, ProfileScan, ScanResult } from '@/lib/scan/messages';
 import { ago, ageText, compact, esc, monthDay, monthYear } from './format';
 

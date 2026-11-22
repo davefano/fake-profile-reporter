@@ -90,7 +90,7 @@ async function markOffered() {
 async function uploadNow() {
   $<HTMLButtonElement>('uploadBtn').disabled = $<HTMLButtonElement>('offerYes').disabled = true;
   setStatus('dataStatus', '', 'Uploading…');
-  const res = await sendMessage<'FLR_UPLOAD'>({ type: 'FLR_UPLOAD' }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
+  const res = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
   $<HTMLButtonElement>('uploadBtn').disabled = $<HTMLButtonElement>('offerYes').disabled = false;
   if (isError(res)) setStatus('dataStatus', 'err', res.message ?? res.error);
   else if (res.failed) setStatus('dataStatus', 'err', `Uploaded ${res.uploaded}, ${res.failed} failed: ${res.error}`);
@@ -130,7 +130,7 @@ async function connect(e: Event) {
     .then((r) => r.ok && r.json())
     .then((b) => b?.ok === true)
     .catch(() => false);
-  if (!ok) return setStatus('customStatus', 'err', `Couldn't reach a Fake LinkedIn Reporter server at ${host(base)}. Saves stay in this browser.`);
+  if (!ok) return setStatus('customStatus', 'err', `Couldn't reach a Fake Profile Reporter server at ${host(base)}. Saves stay in this browser.`);
   $<HTMLInputElement>('customUrl').value = base;
   await updateSettings({ mode: 'custom', customUrl: base });
   setStatus('customStatus', 'ok', `Connected. Saves now also go to ${host(base)}.`);
@@ -140,7 +140,7 @@ async function connect(e: Event) {
 async function exportSaves() {
   const items = await localSaves().list();
   const url = URL.createObjectURL(new Blob([exportFile(items)], { type: 'application/json' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: `fake-linkedin-reporter-saves-${new Date().toISOString().slice(0, 10)}.json` });
+  const a = Object.assign(document.createElement('a'), { href: url, download: `fake-profile-reporter-saves-${new Date().toISOString().slice(0, 10)}.json` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
   setStatus('dataStatus', 'ok', `Exported ${plural(items.length, 'save')}.`);

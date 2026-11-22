@@ -1,4 +1,4 @@
-# Fake LinkedIn Reporter
+# Fake Profile Reporter
 
 A crowd-sourced "is this LinkedIn profile fake?" tool. Open source (MIT).
 

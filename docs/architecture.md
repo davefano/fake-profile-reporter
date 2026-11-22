@@ -22,7 +22,7 @@ LinkedIn facts types.
 `apps/extension/test/layers.test.ts` fails if `lib/linkedin` imports anything
 but the LinkedIn layer and the runtime.
 
-## The LinkedIn data layer (`@flr/core/linkedin`)
+## The LinkedIn data layer (`@fpr/core/linkedin`)
 
 | Module | What it gives you |
 |---|---|
@@ -46,7 +46,7 @@ is somewhere else: the extension passes calls to the LinkedIn tab, the CLI
 passes calls into the research browser. Optional parts that fail are recorded
 in `errors`; the facts that did load are kept.
 
-## The scam layer (`@flr/core/scam`)
+## The scam layer (`@fpr/core/scam`)
 
 `scoreProfile(facts)`, `scoreCompany(facts)`, `scoreJob(job, company, companyScore)`
 return a `Score`: signals with a kind (`discrepancy`, `weak`, `trust`), a 0–100

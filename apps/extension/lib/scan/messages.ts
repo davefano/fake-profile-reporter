@@ -1,9 +1,9 @@
 // Messages for the scam-check feature: the panel asks the background to scan
 // the active tab and to save or report what it found.
 
-import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget, ProfilePart } from '@flr/core/linkedin';
-import type { Score } from '@flr/core/scam';
-import type { LeaderboardResponse } from '@flr/core/wire';
+import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget, ProfilePart } from '@fpr/core/linkedin';
+import type { Score } from '@fpr/core/scam';
+import type { LeaderboardResponse } from '@fpr/core/wire';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
 import { send, type ErrorResponse } from '@/lib/runtime';
 import type { UploadResult } from '@/lib/saves/upload';
@@ -61,13 +61,13 @@ export type SubmitResponse = { ok: true; reported: boolean; server: { score: num
 
 export interface AppMessages {
   /** Scan the active tab's profile, company, or job. */
-  FLR_SCAN: { req: { type: 'FLR_SCAN'; force?: boolean }; res: ScanResponse };
+  FPR_SCAN: { req: { type: 'FPR_SCAN'; force?: boolean }; res: ScanResponse };
   /** Save it (see Settings › Save to), optionally reporting it. `key` is scanKey(). */
-  FLR_SUBMIT: { req: { type: 'FLR_SUBMIT'; key: string; report: boolean }; res: SubmitResponse };
+  FPR_SUBMIT: { req: { type: 'FPR_SUBMIT'; key: string; report: boolean }; res: SubmitResponse };
   /** Reported profiles on the server saves go to. */
-  FLR_LEADERBOARD: { req: { type: 'FLR_LEADERBOARD' }; res: LeaderboardResponse | ErrorResponse };
+  FPR_LEADERBOARD: { req: { type: 'FPR_LEADERBOARD' }; res: LeaderboardResponse | ErrorResponse };
   /** Send saves the server doesn't have yet. */
-  FLR_UPLOAD: { req: { type: 'FLR_UPLOAD' }; res: UploadResult | ErrorResponse };
+  FPR_UPLOAD: { req: { type: 'FPR_UPLOAD' }; res: UploadResult | ErrorResponse };
 }
 
 export const sendMessage = <K extends keyof AppMessages>(msg: AppMessages[K]['req']) => send<AppMessages, K>(msg);

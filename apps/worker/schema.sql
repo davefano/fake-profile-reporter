@@ -1,4 +1,4 @@
--- D1 schema for Fake LinkedIn Reporter.
+-- D1 schema for Fake Profile Reporter.
 -- Apply with: wrangler d1 execute flr --remote --file=./schema.sql
 
 

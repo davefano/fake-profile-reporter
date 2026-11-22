@@ -10,7 +10,7 @@
 // score is never trusted.
 
 import { Hono, type Context } from 'hono';
-import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type RawSnapshot, type Score, type SnapshotResponse } from '@flr/core';
+import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type RawSnapshot, type Score, type SnapshotResponse } from '@fpr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';

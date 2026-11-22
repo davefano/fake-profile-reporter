@@ -1,5 +1,5 @@
 {
-  "name": "@flr/worker",
+  "name": "@fpr/worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@flr/core": "workspace:*",
+    "@fpr/core": "workspace:*",
     "hono": "^4.13.19"
   },
   "devDependencies": {

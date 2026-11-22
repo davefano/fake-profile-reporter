@@ -1,5 +1,5 @@
 {
-  "name": "@flr/extension",
+  "name": "@fpr/extension",
   "version": "2026.11.22.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
-    "@flr/core": "workspace:*"
+    "@fpr/core": "workspace:*"
   },
   "devDependencies": {
     "wxt": "^0.21.5"

@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import type { AccountResponse } from '@flr/core/wire';
-import { extractProfileFacts, scoreProfile } from '@flr/core';
+import type { AccountResponse } from '@fpr/core/wire';
+import { extractProfileFacts, scoreProfile } from '@fpr/core';
 import { createAccountStore } from '../src/accounts-store';
 import { hashIp } from '../src/ip';
 
 const hashIpFor = (ip: string) => hashIp(ip, 'test');
-import { fakeSnapshot } from '@flr/core/test/fixtures';
+import { fakeSnapshot } from '@fpr/core/test/fixtures';
 import app from '../src/index';
 import type { Env } from '../src/env';
 import { createTestD1, createTestKv, createTestR2 } from './d1-sqlite';

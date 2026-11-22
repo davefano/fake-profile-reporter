@@ -1,7 +1,7 @@
 // D1 storage for accounts (keyed by member ID): their current facts, snapshot
 // history, slug history, and reports.
 
-import { type AccountResponse, type FactChange, type LeaderboardRow, type ProfileFacts, type RiskLevel, type Score } from '@flr/core';
+import { type AccountResponse, type FactChange, type LeaderboardRow, type ProfileFacts, type RiskLevel, type Score } from '@fpr/core';
 import { safeJson } from './json';
 
 interface AccountRow {

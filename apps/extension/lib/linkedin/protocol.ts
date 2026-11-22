@@ -2,7 +2,7 @@
 // anything in the extension that needs LinkedIn data (scam checks, profile
 // tips, …) uses these through client.ts.
 
-import type { CompanyExtras, JobExtras, ProfileFacts } from '@flr/core/linkedin';
+import type { CompanyExtras, JobExtras, ProfileFacts } from '@fpr/core/linkedin';
 import type { ErrorResponse } from '@/lib/runtime';
 
 export interface ProfileResult {

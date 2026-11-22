@@ -1,8 +1,8 @@
 // Scan the active tab: read it through the LinkedIn client, score it, and
 // compare with this browser's history of the same profile, company, or job.
 
-import { compactJobFacts, diffCompanyFacts, diffJobFacts, observeProfile, type FactChange, type ProfileFacts, type ProfilePart } from '@flr/core/linkedin';
-import { scoreCompany, scoreJob, scoreProfile } from '@flr/core/scam';
+import { compactJobFacts, diffCompanyFacts, diffJobFacts, observeProfile, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
+import { scoreCompany, scoreJob, scoreProfile } from '@fpr/core/scam';
 import { activeLinkedInTab, linkedin } from '@/lib/linkedin/client';
 import { CodedError, errorText } from '@/lib/runtime';
 import { targetKey, type ScanResponse, type ScanResult } from './messages';

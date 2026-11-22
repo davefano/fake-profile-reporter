@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import type { CompanyFacts, JobFacts } from '@flr/core';
+import type { CompanyFacts, JobFacts } from '@fpr/core';
 import app from '../src/index';
 import type { Env } from '../src/env';
 import { createTestD1, createTestKv, createTestR2 } from './d1-sqlite';

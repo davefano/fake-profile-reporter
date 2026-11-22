@@ -5,7 +5,7 @@
 //   const tab = await activeLinkedInTab();
 //   const { facts } = await linkedin.company('example-co', { tab });
 
-import { getCompany, getJob, linkedInTarget, type CompanyResult, type JobWithCompany, type LinkedInTarget } from '@flr/core/linkedin';
+import { getCompany, getJob, linkedInTarget, type CompanyResult, type JobWithCompany, type LinkedInTarget } from '@fpr/core/linkedin';
 import { CodedError, isError, sendToTab, type ErrorResponse } from '@/lib/runtime';
 import type { LinkedInMessages, ProfileResult } from './protocol';
 

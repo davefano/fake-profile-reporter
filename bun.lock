@@ -3,27 +3,26 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "fake-linkedin-reporter",
+      "name": "fake-profile-reporter",
       "devDependencies": {
         "@types/bun": "^1.4.4",
         "typescript": "^7.0.2",
       },
     },
     "apps/extension": {
-      "name": "@flr/extension",
-      "version": "0.1.0",
+      "name": "@fpr/extension",
       "dependencies": {
-        "@flr/core": "workspace:*",
+        "@fpr/core": "workspace:*",
       },
       "devDependencies": {
         "wxt": "^0.21.5",
       },
     },
     "apps/worker": {
-      "name": "@flr/worker",
+      "name": "@fpr/worker",
       "version": "0.1.0",
       "dependencies": {
-        "@flr/core": "workspace:*",
+        "@fpr/core": "workspace:*",
         "hono": "^4.13.19",
       },
       "devDependencies": {
@@ -32,17 +31,17 @@
       },
     },
     "packages/core": {
-      "name": "@flr/core",
+      "name": "@fpr/core",
       "version": "0.1.0",
     },
     "tools/capture": {
-      "name": "@flr/capture",
+      "name": "@fpr/capture",
       "version": "0.1.0",
       "bin": {
-        "flr-capture": "./capture.ts",
+        "fpr-capture": "./capture.ts",
       },
       "dependencies": {
-        "@flr/core": "workspace:*",
+        "@fpr/core": "workspace:*",
       },
     },
   },
@@ -137,13 +136,13 @@
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.2", "", { "os": "win32", "cpu": "x64" }, "sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g=="],
 
-    "@flr/capture": ["@flr/capture@workspace:tools/capture"],
+    "@fpr/capture": ["@fpr/capture@workspace:tools/capture"],
 
-    "@flr/core": ["@flr/core@workspace:packages/core"],
+    "@fpr/core": ["@fpr/core@workspace:packages/core"],
 
-    "@flr/extension": ["@flr/extension@workspace:apps/extension"],
+    "@fpr/extension": ["@fpr/extension@workspace:apps/extension"],
 
-    "@flr/worker": ["@flr/worker@workspace:apps/worker"],
+    "@fpr/worker": ["@fpr/worker@workspace:apps/worker"],
 
     "@img/colour": ["@img/colour@1.1.0", "", {}, "sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ=="],
 
