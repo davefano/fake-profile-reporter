@@ -1,3 +1,3 @@
 // The shared community database behind the "Community" save option. Null
-// until it is deployed; the option shows as not set up while it is.
-export const COMMUNITY_URL: string | null = null;
+// shows the option as not set up (forks without their own deployment).
+export const COMMUNITY_URL: string | null = 'https://api.fake-profile-reporter.workers.dev';
