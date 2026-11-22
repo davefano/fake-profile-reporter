@@ -6,7 +6,10 @@ import { entities } from './entities';
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use('/api/*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['content-type'] }));
+// Only the extension may call the API from a browser; web pages get no CORS
+// headers. (This stops other sites' scripts, not scripts outside a browser.)
+const EXTENSION_ORIGIN = /^(chrome-extension|moz-extension|safari-web-extension):\/\/[a-z0-9-]+$/i;
+app.use('/api/*', cors({ origin: (o) => (EXTENSION_ORIGIN.test(o) ? o : null), allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['content-type'] }));
 
 app.onError((err, c) => {
   console.error(err);

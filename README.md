@@ -157,6 +157,12 @@ bun run db:init
 bun run deploy
 ```
 
+`wrangler.toml` holds the IDs for the project's own deployment; a fork replaces
+them with its own. Wrangler reads `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` from the environment (keep them in the gitignored
+`.env`). For `bun run dev:api`, copy `apps/worker/.dev.vars.example` to
+`.dev.vars`.
+
 ## License
 
 [MIT](LICENSE)
