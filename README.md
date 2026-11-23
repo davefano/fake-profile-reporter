@@ -149,9 +149,9 @@ are unofficial and change; all of them are in `packages/core/src/linkedin/endpoi
 
 ```bash
 cd apps/worker
-bunx wrangler d1 create flr                 # copy database_id into wrangler.toml
+bunx wrangler d1 create fpr                 # copy database_id into wrangler.toml
 bunx wrangler kv namespace create RATE_KV   # copy id into wrangler.toml
-bunx wrangler r2 bucket create flr-snapshots
+bunx wrangler r2 bucket create fpr-snapshots
 bunx wrangler secret put IP_SALT            # any long random string
 bun run db:init
 bun run deploy

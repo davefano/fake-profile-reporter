@@ -1,5 +1,5 @@
 -- D1 schema for Fake Profile Reporter.
--- Apply with: wrangler d1 execute flr --remote --file=./schema.sql
+-- Apply with: wrangler d1 execute fpr --remote --file=./schema.sql
 
 
 -- Accounts keyed by LinkedIn's stable member ID (slugs change; member IDs don't).

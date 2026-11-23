@@ -4,8 +4,8 @@ compatibility_date = "2026-11-01"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "flr"
-database_id = "ea021b7c-7e32-4bad-a2e4-b7f6669b6cde"
+database_name = "fpr"
+database_id = "7892677c-8926-4268-ad67-fadfb1f6c8b9"
 
 # KV used for per-IP cooldown + daily rate limits.
 [[kv_namespaces]]
@@ -15,7 +15,7 @@ id = "573f08b711714654848e2fe49f05c7f8"
 # Raw profile snapshots (gzipped JSON), keyed snapshots/<memberId>/<time>.json.gz
 [[r2_buckets]]
 binding = "SNAPSHOTS"
-bucket_name = "flr-snapshots"
+bucket_name = "fpr-snapshots"
 
 # IP_SALT (salt for anonymous IP hashing) is a secret: `wrangler secret put
 # IP_SALT` in production, and .dev.vars locally (copy .dev.vars.example).
