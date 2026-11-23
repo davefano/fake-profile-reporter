@@ -10,6 +10,11 @@ const DAY = 86_400_000;
 const YEAR = 365.25 * DAY;
 // Job scams mostly run through recruiter and HR personas.
 const RECRUITER = /\b(recruit\w*|talent acquisition|talent partner|hr|human resources|hiring|staffing|headhunter|people (?:ops|operations|partner))\b/i;
+// Roles that belong to tech, and the industries such people actually pick.
+const TECH_ROLE = /\b(software|developer|programmer|full[- ]?stack|front[- ]?end|back[- ]?end|devops|site reliability|data scientist|machine learning|ml engineer|ai engineer|cloud engineer)\b/i;
+const TECH_INDUSTRY = /software|it services|information|internet|computer|technolog|tech\b|telecom|wireless|data|cyber|network|semiconductor|electronic|automation|robotics|financial|bank|insurance|investment|venture capital|health|hospital|medical|pharma|biotech|research|education|e-learning|university|consult|engineering|defense|aerospace|government|retail|e-commerce|media|entertainment|gam(?:e|ing)|automotive|staffing|marketing|advertising|energy|utilities|logistics|transportation/i;
+// LinkedIn's generated URL suffix ("jane-doe-09722924", "jane-doe-a1b2c3d4"): never customized.
+const DEFAULT_SLUG = /-(?=[0-9a-f]*\d)[0-9a-f]{6,10}$/i;
 const SENIOR = /\b(ceo|cto|cfo|coo|founder|co-founder|director|vp|vice president|head of|chief|partner|president|senior|principal|lead|manager)\b/i;
 
 /** "Microsoft: Verified using work email in June 2024" → "Work email verified at Microsoft (June 2024)". */
@@ -44,17 +49,18 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
     else if (ageMs < 180 * DAY) add('age.recent', `Account is under 6 months old (${age}${how})`, 22 * k);
     else if (ageMs < YEAR) add('age.young', `Account is under a year old (${age}${how})`, 12 * k);
     // Modest credit: aged accounts are bought and sold for scams.
-    else if (ageMs > 5 * YEAR) add('age.established', `Account is ${age} old${est ? ' (estimated from member ID)' : ''}`, -8 * k);
+    // Credit is added after the resale checks below: age is what gets sold.
   } else {
     missing.push('Account age');
   }
 
-  // Verification is the strongest trust signal LinkedIn exposes.
+  // Verification is the strongest trust signal LinkedIn exposes. Work-email
+  // verification is added after the resale checks: an old one can belong to a
+  // previous owner of the account.
+  const verifications = f.about?.verifications ?? [];
   if (f.about) {
-    const v = f.about.verifications;
-    if (v.some((s) => /^identity/i.test(s))) add('verified.identity', 'Identity verified by LinkedIn', -30);
-    else if (v.length) add('verified.other', v.map(verificationLabel).join('; '), -12);
-    else add('verified.none', 'No LinkedIn verifications', 6);
+    if (verifications.some((s) => /^identity/i.test(s))) add('verified.identity', 'Identity verified by LinkedIn', -30);
+    else if (!verifications.length) add('verified.none', 'No LinkedIn verifications', 6);
   } else {
     missing.push('Join date and verifications (About this member)');
   }
@@ -123,23 +129,57 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
 
   // Bought or dormant accounts. Age is the thing being sold, so an old account
   // gets checked for signs that nobody has really lived in it, or that it was
-  // recently taken over.
+  // recently taken over and re-dressed for a new persona.
+  const resale: string[] = [];
   if (f.profileLoaded && ageMs != null && ageMs > 3 * YEAR) {
-    const noFace = f.photo && !f.photo.present && f.background && !f.background.present;
     // Only when activity was actually checked: unknown is not the same as none.
     const quiet = f.activity?.postCount === 0;
-    if (noFace && quiet) {
-      add('aged.shell', 'Old account with no photo, default banner and no activity (common in bought accounts, and easy to impersonate)', 6);
+    if (quiet && f.photo && !f.photo.present) {
+      add('aged.shell', 'Old account with no photo that has never posted (common in bought accounts, and easy to impersonate)', 6);
+      resale.push('no photo, never posted');
     }
-    const recent = (iso: number | null | undefined) => iso != null && now - iso < 180 * DAY;
+    const recent = (ms: number | null | undefined) => ms != null && now - ms < 180 * DAY;
     const recentText = (t: string | null | undefined) => !!t && /less than (?:\d+ (?:days?|weeks?)|[1-6] months?)/i.test(t);
     const refreshed = [
       recent(f.photo?.uploadedAt) || recentText(f.about?.photoUpdated) ? 'photo' : null,
+      recent(f.background?.uploadedAt) ? 'banner' : null,
       recentText(f.about?.contactInfoUpdated) ? 'contact info' : null,
     ].filter(Boolean);
     if (refreshed.length && quiet) {
       add('aged.refreshed', `Old, inactive account with recently changed ${refreshed.join(' and ')} (possible resale or takeover)`, 6);
+      resale.push(`${refreshed.join(' and ')} changed recently`);
     }
+    // The industry is set early and rarely revisited, so it can outlive a persona.
+    const role = [f.headline, f.positions[0]?.title].filter(Boolean).join(' ');
+    if (f.industry && TECH_ROLE.test(role) && !TECH_INDUSTRY.test(f.industry)) {
+      add('aged.industry-mismatch', `Industry "${f.industry}" doesn't fit a tech role (can be left over from an earlier persona)`, 5);
+      resale.push('industry left over');
+    }
+    // Plenty of real people never customize it, so only on accounts nobody uses.
+    if (quiet && f.slug && DEFAULT_SLUG.test(f.slug) && ageMs > 5 * YEAR) {
+      add('aged.default-url', 'Never customized its profile URL in all these years', 3);
+      resale.push('default URL');
+    }
+  }
+  const initialOnly = (n: string | null) => (n ?? '').replace(/\./g, '').trim().length <= 1;
+  if (f.profileLoaded && initialOnly(f.lastName) && resale.length) resale.push('surname reduced to an initial');
+  // One sign means little; several together describe an account that changed hands.
+  const resold = resale.length >= 3;
+  // 3 signs: 12; each more: +6. From 4 up it also keeps the level at least medium.
+  if (resold) add('pattern.aged-resale', `Several signs this old account changed hands: ${resale.join('; ')}`, 12 + 6 * (resale.length - 3));
+
+  // Trust that resale would carry over: deferred from above, and discounted when it looks resold.
+  if (f.joined && ageMs != null && ageMs > 5 * YEAR) {
+    const k = f.joined.source === 'memberId' ? 0.5 : 1;
+    const label = `Account is ${fmtAge(ageMs)} old${f.joined.source === 'memberId' ? ' (estimated from member ID)' : ''}`;
+    if (resold) add('age.established', `${label}, but age is what a resold account is bought for`, 0, 'trust');
+    else add('age.established', label, -8 * k);
+  }
+  const workEmail = verifications.filter((v) => !/^identity/i.test(v));
+  if (workEmail.length && !verifications.some((v) => /^identity/i.test(v))) {
+    const label = workEmail.map(verificationLabel).join('; ');
+    if (resold) add('verified.other', `${label} (may predate a change of owner)`, -6);
+    else add('verified.other', label, -12);
   }
 
   // Profile completeness. If the record didn't load, these are unknown, not empty.
@@ -152,8 +192,8 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
     if (f.educations.length === 0) add('profile.no-education', 'No education listed', 4);
     if (!f.summary?.trim()) add('profile.no-about', 'Empty About section', 4);
     if (f.skills.length === 0) add('profile.no-skills', 'No skills listed', 3);
-    if ((f.firstName ?? '').trim().length <= 1 || (f.lastName ?? '').trim().length <= 1) {
-      add('profile.short-name', 'Name is one letter or missing', 5);
+    if (initialOnly(f.firstName) || initialOnly(f.lastName)) {
+      add('profile.short-name', 'First or last name is just an initial, or missing', 5);
     }
   }
 

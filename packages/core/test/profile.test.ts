@@ -285,6 +285,51 @@ describe('scoreProfile', () => {
     expect(ids.filter((id) => id.startsWith('aged.'))).toEqual([]);
   });
 
+  test('an old account re-dressed for a new persona reads as possibly resold', () => {
+    const base = extractProfileFacts(
+      fakeSnapshot({
+        slug: 'sam-q-48213907',
+        lastName: 'Q.',
+        headline: 'Senior AI Software Engineer | Full-Stack | Cloud',
+        joinedAt: Date.UTC(2010, 7, 15),
+        photoUploadedAt: null,
+        postTimes: [],
+        verifications: [['Example Corp', 'Verified using work email in March 2019']],
+      }),
+      NOW,
+    );
+    const f = { ...base, industry: 'Security & Investigations', background: { present: true, uploadedAt: NOW - 20 * DAY } };
+    const s = scoreProfile(f, NOW);
+    const byId = Object.fromEntries(s.signals.map((x) => [x.id, x]));
+    expect(byId['pattern.aged-resale']?.label).toContain('industry left over');
+    expect(byId['pattern.aged-resale']?.weight).toBe(24); // five signs
+    expect(byId['aged.refreshed']?.label).toContain('banner');
+    expect(byId['profile.short-name']).toBeDefined();
+    // The trust a resold account would carry over is discounted.
+    expect(byId['age.established']?.weight).toBe(0);
+    expect(byId['verified.other']?.weight).toBe(-6);
+    expect(s.level).not.toBe('low');
+  });
+
+  test('a long-standing, lived-in account keeps its trust', () => {
+    const f = extractProfileFacts(
+      fakeSnapshot({ slug: 'sam-quinn-48213907', joinedAt: Date.UTC(2010, 7, 15), postTimes: [NOW - 10 * DAY], verifications: [['Example Corp', 'Verified using work email in March 2019']] }),
+      NOW,
+    );
+    const s = scoreProfile({ ...f, industry: 'Investment Banking' }, NOW);
+    const ids = s.signals.map((x) => x.id);
+    expect(ids.filter((id) => id.startsWith('aged.') || id === 'pattern.aged-resale')).toEqual([]);
+    expect(s.signals.find((x) => x.id === 'age.established')?.weight).toBe(-8);
+    expect(s.signals.find((x) => x.id === 'verified.other')?.weight).toBe(-12);
+  });
+
+  test('one or two resale signs alone are not a pattern', () => {
+    const f = extractProfileFacts(fakeSnapshot({ joinedAt: Date.UTC(2010, 7, 15), photoUploadedAt: null, postTimes: [] }), NOW);
+    const ids = scoreProfile(f, NOW).signals.map((x) => x.id);
+    expect(ids).toContain('aged.shell');
+    expect(ids).not.toContain('pattern.aged-resale');
+  });
+
   test('a recruiter is not penalized for verifications that were never read', () => {
     const f = extractProfileFacts(fakeSnapshot({ joinedAt: null, headline: 'Senior Recruiter' }), NOW);
     const ids = scoreProfile({ ...f, about: null, joined: { at: NOW - 100 * DAY, source: 'memberId' } }, NOW).signals.map((x) => x.id);
