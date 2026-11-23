@@ -97,11 +97,17 @@ function ym(d: any): YearMonth | null {
   return typeof d.month === 'number' ? { year: d.year, month: d.month } : { year: d.year };
 }
 
-/** Upload timestamp from a vector image's artifact paths (…/0/1696284332069). */
-function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } {
+/**
+ * Whether there's an image, and its upload time from the artifact paths
+ * (…/0/1696284332069). No field at all means no image. A field with the image
+ * stripped out means the member hid it from this viewer (photo visibility set
+ * to their network, say): unknown, so null.
+ */
+function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } | null {
+  if (pic == null) return { present: false, uploadedAt: null };
   const raw = pic?.displayImageReference?.vectorImage?.artifacts;
   const artifacts: any[] = Array.isArray(raw) ? raw : [];
-  if (!artifacts.length) return { present: false, uploadedAt: null };
+  if (!artifacts.length) return pic.displayImageReference || pic.displayImageUrn ? { present: false, uploadedAt: null } : null;
   return { present: true, uploadedAt: mediaUploadedAt(String(artifacts[0]?.fileIdentifyingUrlPathSegment ?? '')) };
 }
 

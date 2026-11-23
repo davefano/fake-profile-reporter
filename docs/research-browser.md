@@ -19,3 +19,4 @@ agent-browser open https://www.linkedin.com/feed/
 - `agent-browser network requests` lists what a page loads. HAR files have
   empty bodies for voyager and RSC responses, so replay those instead.
 - Keep volume to a handful of profiles, companies or jobs per task.
+- It is signed in as a different LinkedIn account from the user's own, so it sees what an outsider sees: photos limited to the member's network show as placeholders, and connection degree and mutual connections differ from what the user sees.

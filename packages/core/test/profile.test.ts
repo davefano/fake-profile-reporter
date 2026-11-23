@@ -337,6 +337,17 @@ describe('scoreProfile', () => {
     expect(ids).not.toContain('pattern.recruiter-unverified');
   });
 
+  test('a photo hidden from this viewer is not checked, not missing', () => {
+    const f = extractProfileFacts(fakeSnapshot({ photoHidden: true, joinedAt: Date.UTC(2010, 7, 15), postTimes: [] }), NOW);
+    expect(f.photo).toBeNull();
+    const s = scoreProfile(f, NOW);
+    const ids = s.signals.map((x) => x.id);
+    expect(ids).not.toContain('photo.none');
+    expect(ids).not.toContain('aged.shell');
+    expect(s.missing).toContain('Profile photo (hidden from your account)');
+    expect(extractProfileFacts(fakeSnapshot({ photoUploadedAt: null }), NOW).photo).toEqual({ present: false, uploadedAt: null });
+  });
+
   test('member-ID age estimates count for half', () => {
     const f = extractProfileFacts(fakeSnapshot({ joinedAt: null }), NOW);
     const sig = scoreProfile({ ...f, joined: { at: NOW - 10 * DAY, source: 'memberId' } }, NOW).signals.find((x) => x.id === 'age.new');

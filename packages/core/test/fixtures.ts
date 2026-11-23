@@ -37,6 +37,8 @@ export interface FakeProfile {
   premium?: boolean;
   influencer?: boolean;
   photoUploadedAt?: number | null;
+  /** The member limited who can see the photo: LinkedIn sends the field without the image. */
+  photoHidden?: boolean;
   positions?: Array<{ title: string; company: string; startYear: number; endYear?: number; companyId?: number }>;
   /** Unrelated profiles LinkedIn bundles in (recommenders, people also viewed), placed first. */
   strangers?: number;
@@ -55,8 +57,9 @@ export function fakeSnapshot(p: FakeProfile = {}): RawSnapshot {
   const profileId = profileIdFor(memberId);
   const slug = p.slug ?? 'jordan-sample-0a1b2c';
   const urn = `urn:li:fsd_profile:${profileId}`;
-  const photo =
-    p.photoUploadedAt === null
+  const photo = p.photoHidden
+    ? { $type: 'com.linkedin.voyager.dash.identity.profile.PhotoFilterPicture' }
+    : p.photoUploadedAt === null
       ? undefined
       : {
           displayImageReference: {
