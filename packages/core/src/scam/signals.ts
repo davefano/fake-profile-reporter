@@ -11,7 +11,7 @@ export function levelFor(score: number): RiskLevel {
 }
 
 
-export const SCORE_VERSION = 3;
+export const SCORE_VERSION = 4;
 
 /**
  * - `discrepancy`: the profile's claims don't fit together. A verification task, not proof.

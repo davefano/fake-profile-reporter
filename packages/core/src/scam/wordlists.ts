@@ -1,7 +1,8 @@
 // Word lists for text signals. Weak on their own; real people use buzzwords too.
 
+// No "token": engineers write about auth tokens far more than scammers do.
 export const CRYPTO = [
-  'crypto', 'web3', 'nft', 'token', 'blockchain', 'defi', 'coin', 'bitcoin',
+  'crypto', 'web3', 'nft', 'blockchain', 'defi', 'coin', 'bitcoin',
   'ethereum', 'airdrop', 'metaverse',
 ];
 
@@ -17,16 +18,23 @@ export const BUZZ = [
   'let\'s connect', 'synergy', 'leveraging', 'empowering',
 ];
 
+/**
+ * Which phrases appear as whole words (a plural "s" is fine), ignoring case:
+ * "defi" matches "DeFi" but not "define", "crypto" not "cryptography".
+ */
 export function countMatches(haystack: string, needles: string[]): { n: number; hits: string[] } {
-  const s = (haystack || '').toLowerCase();
-  let n = 0;
-  const hits: string[] = [];
-  for (const needle of needles) {
-    if (s.includes(needle)) {
-      n++;
-      hits.push(needle.trim());
-    }
-  }
-  return { n, hits };
+  const s = (haystack || '').replace(/[‘’]/g, "'"); // LinkedIn text often uses curly apostrophes
+  const hits = needles.filter((needle) => wholeWord(needle).test(s)).map((n) => n.trim());
+  return { n: hits.length, hits };
 }
 
+const cache = new Map<string, RegExp>();
+function wholeWord(phrase: string): RegExp {
+  let re = cache.get(phrase);
+  if (!re) {
+    const body = phrase.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    re = new RegExp(`(?<![\\p{L}\\p{N}])${body}s?(?![\\p{L}\\p{N}])`, 'iu');
+    cache.set(phrase, re);
+  }
+  return re;
+}
