@@ -6,6 +6,7 @@ import { destinationLabel, getSettings, onSettingsChanged, serverBase, type Sett
 import { linkedInTarget } from '@fpr/core/linkedin';
 import { scanKey, sendMessage, targetKey, type ScanResult, type SubmitResponse } from '@/lib/scan/messages';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
+import { mountReport } from './report-form';
 import { loadSaved } from './saved';
 import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
 import { renderResult } from './views';
@@ -132,56 +133,47 @@ async function scan(force = false) {
 
 // --- actions ---------------------------------------------------------------------
 function bindResult() {
-  $('trackBtn').addEventListener('click', () => submit(false));
-  $('reportBtn').addEventListener('click', () => submit(true));
+  if (!current) return;
+  $('trackBtn').addEventListener('click', track);
+  const where = () => (settings && serverBase(settings) ? destinationLabel(settings) : null);
+  mountReport(scanKey(current), current.kind, where, invalidateLeaderboard);
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
     img.addEventListener('error', () => img.remove(), { once: true }),
   );
 }
 
-async function submit(report: boolean) {
+/** Save without saying anything about it. */
+async function track() {
   if (!current) return;
-  const btn = $<HTMLButtonElement>(report ? 'reportBtn' : 'trackBtn');
-  const other = $<HTMLButtonElement>(report ? 'trackBtn' : 'reportBtn');
+  const btn = $<HTMLButtonElement>('trackBtn');
   const status = $('submitStatus');
-  const label = btn.textContent;
-  btn.disabled = other.disabled = true;
-  btn.textContent = report ? 'Reporting…' : 'Saving…';
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
   status.className = 'status';
   status.textContent = '';
 
-  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key: scanKey(current), report }).catch((e): ErrorResponse => ({
+  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key: scanKey(current) }).catch((e): ErrorResponse => ({
     error: 'panel_error',
     message: String(e),
   }));
   if (!isError(res)) {
-    btn.textContent = report ? 'Reported ✓' : 'Tracked ✓';
-    other.disabled = report; // can still report after tracking
+    btn.textContent = 'Saved ✓';
     status.className = 'status ok';
     if (!res.server) {
-      status.textContent = report ? 'Reported in this browser only. To share reports, change Save to in Settings.' : 'Saved in this browser.';
+      status.textContent = 'Saved in this browser.';
       return;
     }
     // The server scores without viewer-relative signals, so its number can differ.
     const where = settings ? destinationLabel(settings) : 'the server';
-    const theirs = res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
-    status.textContent = (report ? `Reported to ${where}. Thank you.` : `Saved to ${where}.`) + theirs;
-    if (res.reported) invalidateLeaderboard();
+    const theirs = res.server.score != null && res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
+    status.textContent = `Saved to ${where}.${theirs}`;
     return;
   }
-  btn.disabled = other.disabled = false;
-  btn.textContent = label;
+  btn.disabled = !!res.savedLocally;
+  btn.textContent = res.savedLocally ? 'Saved ✓' : 'Track';
   status.className = 'status err';
-  if (res.savedLocally) {
-    btn.textContent = report ? 'Reported ✓' : 'Tracked ✓';
-    btn.disabled = true;
-    other.disabled = report;
-  }
   const MSG: Record<string, string> = {
-    already_reported_recently: 'You reported this recently.',
     daily_limit_reached: 'Daily limit reached. Try again tomorrow.',
-    captured_recently: 'This was saved a few minutes ago.',
-    observed_recently: 'This was saved a few minutes ago.',
   };
   const why = MSG[res.error] ?? res.message ?? res.error;
   status.textContent = res.savedLocally ? `Saved in this browser, but not sent: ${why}` : why;

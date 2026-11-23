@@ -1,8 +1,9 @@
 // D1 storage for accounts (keyed by member ID): their current facts, snapshot
-// history, slug history, and reports.
+// history and slug history, and the report counts shown with them.
 
 import { type AccountResponse, type FactChange, type LeaderboardRow, type ProfileFacts, type RiskLevel, type Score } from '@fpr/core';
 import { safeJson } from './json';
+import { countsFrom, reportCounts } from './reports-store';
 
 interface AccountRow {
   member_id: number;
@@ -34,6 +35,8 @@ interface LeaderboardDbRow {
   score: number;
   level: string;
   reports: number;
+  impersonated: number;
+  vouches: number;
   last_reported: number;
 }
 
@@ -160,24 +163,28 @@ export function createAccountStore(db: D1Database) {
       ]);
     },
 
-    async addReport(r: { memberId: number; score: number; ipHash: string; createdAt: number }): Promise<void> {
-      await db.prepare(`INSERT INTO account_reports (member_id, score, ip_hash, created_at) VALUES (?, ?, ?, ?)`).bind(r.memberId, r.score, r.ipHash, r.createdAt).run();
-    },
-
-    /** Reported accounts, most reports first, then highest current score. */
+    /** Accounts with an active "looks suspicious" report: most reports first, then highest current score. */
     async leaderboard(limit: number): Promise<{ rows: LeaderboardRow[]; stats: { reports: number; accounts: number } }> {
       const [rows, stats] = await Promise.all([
         db
           .prepare(
-            `SELECT a.member_id, a.slug, a.first_name, a.last_name, a.headline, a.score, a.level, r.reports, r.last_reported
-             FROM (SELECT member_id, COUNT(*) AS reports, MAX(created_at) AS last_reported FROM account_reports GROUP BY member_id) r
-             JOIN accounts a ON a.member_id = r.member_id
+            `SELECT a.member_id, a.slug, a.first_name, a.last_name, a.headline, a.score, a.level, r.reports, r.impersonated, r.vouches, r.last_reported
+             FROM (SELECT target_id,
+                          SUM(stance = 'report') AS reports,
+                          SUM(stance = 'impersonated') AS impersonated,
+                          SUM(stance = 'vouch') AS vouches,
+                          MAX(CASE WHEN stance = 'report' THEN updated_at END) AS last_reported
+                   FROM reports WHERE kind = 'profile' AND withdrawn_at IS NULL GROUP BY target_id) r
+             JOIN accounts a ON a.member_id = CAST(r.target_id AS INTEGER)
+             WHERE r.reports > 0
              ORDER BY r.reports DESC, a.score DESC, r.last_reported DESC
              LIMIT ?`,
           )
           .bind(limit)
           .all<LeaderboardDbRow>(),
-        db.prepare(`SELECT COUNT(*) AS reports, COUNT(DISTINCT member_id) AS accounts FROM account_reports`).first<{ reports: number; accounts: number }>(),
+        db
+          .prepare(`SELECT COUNT(*) AS reports, COUNT(DISTINCT target_id) AS accounts FROM reports WHERE kind = 'profile' AND stance = 'report' AND withdrawn_at IS NULL`)
+          .first<{ reports: number; accounts: number }>(),
       ]);
       return {
         stats: { reports: Number(stats?.reports ?? 0), accounts: Number(stats?.accounts ?? 0) },
@@ -188,6 +195,8 @@ export function createAccountStore(db: D1Database) {
           name: [r.first_name, r.last_name].filter(Boolean).join(' ') || r.slug || `Member ${r.member_id}`,
           headline: r.headline,
           reports: Number(r.reports),
+          impersonated: Number(r.impersonated),
+          vouches: Number(r.vouches),
           score: Number(r.score),
           level: r.level as RiskLevel,
           lastReported: Number(r.last_reported),
@@ -202,7 +211,7 @@ export function createAccountStore(db: D1Database) {
         db.prepare(`SELECT facts_json FROM account_current WHERE member_id = ?`).bind(memberId),
         db.prepare(`SELECT slug, first_seen, last_seen FROM account_slugs WHERE member_id = ? ORDER BY first_seen`).bind(memberId),
         db.prepare(`SELECT id, captured_at, score, changes_json FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`).bind(memberId),
-        db.prepare(`SELECT COUNT(*) AS n FROM account_reports WHERE member_id = ?`).bind(memberId),
+        reportCounts(db, 'profile', String(memberId)),
       ]);
       const a = accountRows?.results[0] as AccountRow | undefined;
       if (!a) return null;
@@ -210,7 +219,7 @@ export function createAccountStore(db: D1Database) {
       const current = currentRow ? { facts: safeJson<ProfileFacts | null>(currentRow.facts_json, null) } : null;
       const slugs = { results: (slugRows?.results ?? []) as Array<{ slug: string; first_seen: number; last_seen: number }> };
       const snapshots = { results: (snapshotRows?.results ?? []) as SnapshotRow[] };
-      const reports = reportRows?.results[0] as { n: number } | undefined;
+      const counts = countsFrom(reportRows?.results[0]);
       // Everything about the profile from its current facts; the accounts row only adds counts and the score.
       const f = current?.facts ?? null;
       return {
@@ -233,7 +242,7 @@ export function createAccountStore(db: D1Database) {
         firstCapturedAt: a.first_captured_at,
         lastCapturedAt: a.last_captured_at,
         snapshotCount: a.snapshot_count,
-        reports: Number(reports?.n ?? 0),
+        counts,
         slugs: slugs.results.map((x) => ({ slug: x.slug, firstSeen: x.first_seen, lastSeen: x.last_seen })),
         snapshots: snapshots.results.map((x) => ({ id: x.id, capturedAt: x.captured_at, score: x.score, changes: safeJson<FactChange[]>(x.changes_json, []) })),
       };

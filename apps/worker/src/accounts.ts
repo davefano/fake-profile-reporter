@@ -1,10 +1,9 @@
-// Profile snapshots, reports, and account lookup.
+// Profile snapshots and account lookup. Reports are in reports.ts.
 //
-//   POST /api/snapshots[?report=1]  raw snapshot JSON (optionally gzipped) → R2 + D1; with
-//                                   report=1, also reports the account as suspicious
-//   GET  /api/accounts/:memberId     latest facts, slug history, snapshot history, report count
+//   POST /api/snapshots              raw snapshot JSON (optionally gzipped) → R2 + D1
+//   GET  /api/accounts/:memberId     latest facts, slug history, snapshot history, report counts
 //   GET  /api/accounts?slug=…        same, looked up by any slug the account has used
-//   GET  /api/leaderboard            reported accounts, ranked
+//   GET  /api/leaderboard            accounts reported as suspicious, ranked
 //
 // The server re-parses and re-scores every snapshot itself: the client's own
 // score is never trusted.
@@ -18,9 +17,8 @@ import { reporterLimits } from './limits';
 import { cleanSnapshot } from './snapshot';
 
 const MAX_BYTES = 25 * 1024 * 1024;
-const DAILY_LIMIT = 200; // snapshots + reports per reporter per day
+const DAILY_LIMIT = 200; // snapshots per reporter per day
 const SNAPSHOT_COOLDOWN_MS = 10 * 60 * 1000; // per reporter per account
-const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // per reporter per account
 
 export const accounts = new Hono<{ Bindings: Env }>();
 
@@ -35,7 +33,6 @@ accounts.post('/api/snapshots', async (c) => {
   if (Number(c.req.header('content-length') || 0) > MAX_BYTES) return c.json({ error: 'too_large' }, 413);
   const body = new Uint8Array(await c.req.arrayBuffer());
   if (body.byteLength > MAX_BYTES) return c.json({ error: 'too_large' }, 413);
-  const report = c.req.query('report') === '1';
 
   // Accept plain or gzipped JSON.
   let parsed: unknown;
@@ -64,33 +61,22 @@ accounts.post('/api/snapshots', async (c) => {
   const limits = await reporterLimits(c, now);
   const day = await limits.daily('snapshots', DAILY_LIMIT);
   if (!day.ok) return c.json({ error: 'daily_limit_reached' }, 429);
-  const reportCd = report ? await limits.cooldown(`report:${memberId}`, REPORT_COOLDOWN_MS) : null;
-  if (reportCd && !reportCd.ok) return c.json({ error: 'already_reported_recently' }, 429);
   const snapCd = await limits.cooldown(`snapshot:${memberId}`, SNAPSHOT_COOLDOWN_MS);
-  if (!snapCd.ok && !report) return c.json({ error: 'captured_recently' }, 429);
+  if (!snapCd.ok) return c.json({ error: 'captured_recently' }, 429);
 
   const store = createAccountStore(c.env.DB);
   const finish = async (score: Score, changes: FactChange[]) => {
-    // Recorded and returned: the directory's score for the account now.
-    if (reportCd) {
-      await store.addReport({ memberId, score: score.score, ipHash: limits.ipHash, createdAt: now });
-      await reportCd.commit();
-    }
     await day.commit();
-    const res: SnapshotResponse = { ok: true, memberId, slug: facts.slug, score, changes, reported: report };
+    // The directory's score for the account now.
+    const res: SnapshotResponse = { ok: true, memberId, slug: facts.slug, score, changes };
     return c.json(res, 201);
   };
 
-  // Answer with what's stored, without storing anything: for a report inside
-  // the snapshot cooldown, or a capture that's already on record.
+  // Answer with what's stored, without storing anything: for a capture that's already on record.
   const answerStored = async () => {
     const stored = await store.current(memberId);
     return stored ? finish(scoreProfile(stored.facts, stored.capturedAt), []) : null;
   };
-  if (!snapCd.ok) {
-    const res = await answerStored();
-    if (res) return res;
-  }
 
   // Store the snapshot. Archive first: if that fails, nothing in D1 has changed.
   // The key is a hash of the contents, so a capture uploaded twice is stored once.

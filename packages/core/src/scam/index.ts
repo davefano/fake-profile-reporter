@@ -6,3 +6,4 @@ export * from './wordlists';
 export * from './profile';
 export * from './company';
 export * from './job';
+export * from './reports';

@@ -5,6 +5,7 @@ import { ago, esc } from './format';
 import { avatar } from './views';
 
 const KIND = { profile: 'Profile', company: 'Company', job: 'Job' } as const;
+const SAID = { report: 'Reported', impersonated: 'Flagged as impersonated', vouch: 'Vouched for' } as const;
 
 export async function loadSaved(list: HTMLElement) {
   const items = await localSaves()
@@ -16,7 +17,7 @@ export async function loadSaved(list: HTMLElement) {
   }
   list.innerHTML = `<ul class="board">${items
     .map((i) => {
-      const when = i.reportedAt !== null ? `Reported ${ago(i.reportedAt)}` : `Saved ${ago(i.savedAt)}`;
+      const when = i.report ? `${SAID[i.report.stance]} ${ago(i.report.at)}` : `Saved ${ago(i.savedAt)}`;
       return `<li>
         ${avatar(null, i.name, 'sm')}
         <a class="b-name" href="${esc(i.url)}" target="_blank" rel="noopener noreferrer">${esc(i.name)}<small>${KIND[i.kind]} · ${esc(when)}${i.detail ? ` · ${esc(i.detail)}` : ''}</small></a>

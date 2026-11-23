@@ -52,19 +52,6 @@ CREATE TABLE IF NOT EXISTS account_current (
   FOREIGN KEY (member_id) REFERENCES accounts(member_id)
 );
 
--- Reports that an account looks suspicious, one per reporter per day. The
--- score is the account's score at report time.
-CREATE TABLE IF NOT EXISTS account_reports (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  member_id   INTEGER NOT NULL,
-  score       INTEGER NOT NULL,
-  ip_hash     TEXT NOT NULL,
-  created_at  INTEGER NOT NULL,
-  FOREIGN KEY (member_id) REFERENCES accounts(member_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_account_reports_member ON account_reports(member_id, created_at);
-
 -- Every slug an account has been seen under.
 CREATE TABLE IF NOT EXISTS account_slugs (
   member_id   INTEGER NOT NULL,
@@ -91,18 +78,30 @@ CREATE TABLE IF NOT EXISTS entities (
   first_seen INTEGER NOT NULL,
   last_seen INTEGER NOT NULL,
   observation_count INTEGER NOT NULL DEFAULT 0,
-  report_count INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (kind, entity_id)
 );
-CREATE INDEX IF NOT EXISTS idx_entities_reports ON entities (kind, report_count DESC);
 
-CREATE TABLE IF NOT EXISTS entity_reports (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,
-  entity_id TEXT NOT NULL,
-  score INTEGER NOT NULL,
-  ip_hash TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (kind, entity_id) REFERENCES entities (kind, entity_id)
+-- What people say about a saved profile, company or job: one row per reporter
+-- per target, which they can edit or withdraw. The reporter is a hash of a
+-- secret key the extension keeps, so only its holder can change the row.
+-- stance: 'report' (looks suspicious), 'impersonated' (someone used this
+-- person's identity; never counts against the profile), 'vouch' (real).
+-- note is private: stored for building heuristics, never returned by the API.
+-- score_json is the target's Score when the report was last written.
+CREATE TABLE IF NOT EXISTS reports (
+  kind          TEXT NOT NULL CHECK (kind IN ('profile', 'company', 'job')),
+  target_id     TEXT NOT NULL,        -- member ID for profiles, LinkedIn ID for companies and jobs
+  reporter      TEXT NOT NULL,
+  stance        TEXT NOT NULL CHECK (stance IN ('report', 'impersonated', 'vouch')),
+  reasons_json  TEXT NOT NULL,
+  confidence    TEXT CHECK (confidence IN ('suspected', 'confirmed')),
+  note          TEXT,
+  score_json    TEXT NOT NULL,
+  ip_hash       TEXT NOT NULL,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  withdrawn_at  INTEGER,
+  PRIMARY KEY (kind, target_id, reporter)
 );
-CREATE INDEX IF NOT EXISTS idx_entity_reports_entity ON entity_reports (kind, entity_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_reports_active ON reports(kind, target_id, stance) WHERE withdrawn_at IS NULL;

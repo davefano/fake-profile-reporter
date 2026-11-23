@@ -4,6 +4,7 @@ import type { LeaderboardRow } from '@fpr/core/wire';
 import { isError } from '@/lib/runtime';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
+import { countsText } from './report-form';
 import { avatar } from './views';
 
 let boardLoaded = false;
@@ -21,7 +22,7 @@ export async function loadLeaderboard(list: HTMLElement) {
     return;
   }
   if (!rows.length) {
-    list.innerHTML = '<div class="empty"><h2>No reports yet</h2><p>Profiles reported to this server show up here.</p></div>';
+    list.innerHTML = '<div class="empty"><h2>No reports yet</h2><p>Profiles reported as suspicious on this server show up here.</p></div>';
     return;
   }
   list.innerHTML = `<ol class="board">${rows
@@ -29,7 +30,7 @@ export async function loadLeaderboard(list: HTMLElement) {
       return `<li>
         <span class="rank">${i + 1}</span>
         ${avatar(null, r.name, 'sm')}
-        <a class="b-name" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.name)}<small>${r.reports} report${r.reports === 1 ? '' : 's'}</small></a>
+        <a class="b-name" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.name)}<small>${esc(countsText(r))}</small></a>
         <span class="b-score level-${r.level}">${r.score}</span>
       </li>`;
     })

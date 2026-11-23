@@ -17,3 +17,9 @@ export function clientIp(request: Request): string {
     '127.0.0.1'
   );
 }
+
+/** The secret key the extension sends as x-reporter-key: at least 32 URL-safe characters. */
+export const REPORTER_KEY = /^[A-Za-z0-9_-]{32,128}$/;
+
+/** Anonymous reporter: hash(salt + key). The key itself is never stored. */
+export const hashReporter = (key: string, salt = '') => hashIp(`reporter:${key}`, salt);

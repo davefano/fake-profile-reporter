@@ -13,6 +13,7 @@ apps/extension/lib/
   runtime.ts    typed messaging between extension contexts
   linkedin/     the extension's LinkedIn bridge (feature-free)
   scan/         the scam-check feature: scan, score, history, submit, its messages
+  saves/        where saves go: settings, the in-browser store, the reporter key, uploads
   panel/        the scam-check UI
 ```
 

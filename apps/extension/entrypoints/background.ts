@@ -7,7 +7,7 @@ import { getSettings, serverBase } from '@/lib/saves/settings';
 import { uploadPending } from '@/lib/saves/upload';
 import type { AppMessages } from '@/lib/scan/messages';
 import { scan } from '@/lib/scan/scan';
-import { submit } from '@/lib/scan/submit';
+import { submit, withdraw } from '@/lib/scan/submit';
 import { setUpToolbarToggle } from '@/lib/toolbar';
 
 const NO_SERVER = { error: 'no_server', message: 'Saves stay in this browser. Pick a server in Settings to see reports.' };
@@ -20,6 +20,7 @@ export default defineBackground({
     serve<AppMessages>({
       FPR_SCAN: (msg) => scan(!!msg.force),
       FPR_SUBMIT: (msg) => submit(msg.key, msg.report),
+      FPR_WITHDRAW: (msg) => withdraw(msg.key),
       FPR_LEADERBOARD: async () => {
         const base = serverBase(await getSettings());
         return base ? api<LeaderboardResponse>(base, 'GET', '/api/leaderboard?limit=50') : NO_SERVER;

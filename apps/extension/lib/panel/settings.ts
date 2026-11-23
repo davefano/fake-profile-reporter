@@ -3,7 +3,8 @@
 import { COMMUNITY_URL } from '@/lib/config';
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { getSettings, normalizeServer, serverBase, updateSettings, type SaveMode, type Settings } from '@/lib/saves/settings';
-import { exportFile, localSaves, parseExport, pendingFor } from '@/lib/saves/store';
+import { setReporterKey, storedReporterKey } from '@/lib/saves/reporter';
+import { exportFile, localSaves, parseExport, pendingFor, reportsPendingFor } from '@/lib/saves/store';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
 
@@ -33,6 +34,7 @@ export const SETTINGS_MARKUP = `
 
 <h2 class="set-h">Your saves</h2>
 <p class="set-p" id="saveCount">&nbsp;</p>
+<p class="set-p">Export includes your reporter key, which lets you edit or withdraw your reports from another browser. Keep the file private, like a password.</p>
 <div class="btn-row even">
   <button id="exportBtn" class="btn secondary">Export</button>
   <button id="importBtn" class="btn secondary">Import</button>
@@ -61,14 +63,16 @@ export async function refreshSettings() {
   if (!$<HTMLInputElement>('customUrl').value) $<HTMLInputElement>('customUrl').value = s.customUrl;
 
   const items = await localSaves().list();
-  const reported = items.filter((i) => i.reportedAt !== null).length;
+  const said = items.filter((i) => i.report);
+  const reported = said.filter((i) => i.report!.stance === 'report').length;
+  const vouched = said.filter((i) => i.report!.stance === 'vouch').length;
   $('saveCount').textContent = items.length
-    ? `${plural(items.length, 'save')} in this browser, ${reported} reported.`
+    ? `${plural(items.length, 'save')} in this browser: ${reported} reported, ${vouched} vouched for.`
     : 'Nothing saved in this browser yet.';
   $<HTMLButtonElement>('exportBtn').disabled = !items.length;
 
   const base = serverBase(s);
-  const pending = base ? pendingFor(items, base).length : 0;
+  const pending = base ? new Set([...pendingFor(items, base), ...reportsPendingFor(items, base)]).size : 0;
   $('uploadBtn').classList.toggle('hidden', !pending);
   if (base && pending) $('uploadBtn').textContent = `Upload ${plural(pending, 'save')} to ${host(base)}`;
   showOffer(s, base, pending);
@@ -139,7 +143,7 @@ async function connect(e: Event) {
 
 async function exportSaves() {
   const items = await localSaves().list();
-  const url = URL.createObjectURL(new Blob([exportFile(items)], { type: 'application/json' }));
+  const url = URL.createObjectURL(new Blob([exportFile(items, await storedReporterKey())], { type: 'application/json' }));
   const a = Object.assign(document.createElement('a'), { href: url, download: `fake-profile-reporter-saves-${new Date().toISOString().slice(0, 10)}.json` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
@@ -151,10 +155,23 @@ async function importSaves() {
   $<HTMLInputElement>('importFile').value = '';
   if (!file) return;
   try {
-    const { items, skipped } = parseExport(await file.text());
+    const { items, skipped, reporterKey } = parseExport(await file.text());
+    // Take the file's reporter key only if this browser has none, or hasn't sent
+    // a report with its own: otherwise its own reports could no longer be edited.
+    const own = await storedReporterKey();
+    let keyNote = '';
+    if (reporterKey && reporterKey !== own) {
+      const sentAny = (await localSaves().list()).some((i) => i.report?.sentTo.length);
+      if (!own || !sentAny) {
+        await setReporterKey(reporterKey);
+        keyNote = ' Using the reporter key from the file.';
+      } else {
+        keyNote = " Kept this browser's reporter key, so reports sent from the other browser can't be edited here.";
+      }
+    }
     const { added, updated } = await localSaves().merge(items);
     const parts = [`${added} added`, `${updated} updated`, ...(skipped ? [`${skipped} skipped (unreadable)`] : [])];
-    setStatus('dataStatus', 'ok', `Imported: ${parts.join(', ')}.`);
+    setStatus('dataStatus', 'ok', `Imported: ${parts.join(', ')}.${keyNote}`);
   } catch (e) {
     setStatus('dataStatus', 'err', e instanceof Error ? e.message : String(e));
   }

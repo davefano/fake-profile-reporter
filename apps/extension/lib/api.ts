@@ -3,12 +3,22 @@
 
 import type { ErrorResponse } from '@/lib/runtime';
 
-export async function api<T>(base: string, method: 'GET' | 'POST', path: string, body?: Uint8Array | object): Promise<T | ErrorResponse> {
+/** `reporterKey` identifies this browser's reports (see lib/saves/reporter.ts). */
+export async function api<T>(
+  base: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  body?: Uint8Array | object,
+  reporterKey?: string,
+): Promise<T | ErrorResponse> {
+  const headers: Record<string, string> = {};
+  if (body) headers['content-type'] = 'application/json';
+  if (reporterKey) headers['x-reporter-key'] = reporterKey;
   let res: Response;
   try {
     res = await fetch(base + path, {
       method,
-      headers: body ? { 'content-type': 'application/json' } : undefined,
+      headers,
       body: body === undefined ? undefined : body instanceof Uint8Array ? new Blob([body as Uint8Array<ArrayBuffer>]) : JSON.stringify(body),
     });
   } catch {

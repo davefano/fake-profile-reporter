@@ -1,7 +1,9 @@
 // Company pages and job postings.
 //
-//   POST /api/entities                 EntityRequest → observation (+ report)
+//   POST /api/entities                 EntityRequest → observation
 //   GET  /api/entities/:kind/:id       EntityRecord: latest facts, score, counts
+//
+// Reports on them are in reports.ts.
 //
 // The client sends facts it read from LinkedIn's public pages; the worker
 // can't fetch them itself. We check their shape, recompute the score ourselves,
@@ -13,11 +15,11 @@ import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type Ent
 import type { Env } from './env';
 import { safeJson } from './json';
 import { reporterLimits } from './limits';
+import { countsFrom, reportCounts } from './reports-store';
 
 const MAX_BODY = 256 * 1024;
 const OBSERVE_COOLDOWN_MS = 10 * 60 * 1000; // per reporter per entity
-const REPORT_COOLDOWN_MS = 24 * 60 * 60 * 1000; // per reporter per entity
-const DAILY_LIMIT = 200; // per reporter, observations and reports together
+const DAILY_LIMIT = 200; // observations per reporter per day
 
 export const entities = new Hono<{ Bindings: Env }>();
 
@@ -136,7 +138,6 @@ interface EntityRow {
   first_seen: number;
   last_seen: number;
   observation_count: number;
-  report_count: number;
 }
 
 // --- routes ------------------------------------------------------------------------
@@ -182,59 +183,26 @@ entities.post('/api/entities', async (c) => {
     score = scoreJob(f, company, company ? scoreCompany(company, now) : null);
   }
 
-  const report = body.report === true;
   const limits = await reporterLimits(c, now);
   const day = await limits.daily('entities', DAILY_LIMIT);
   if (!day.ok) return c.json({ error: 'daily_limit_reached' }, 429);
   const observe = await limits.cooldown(`observe:${kind}:${id}`, OBSERVE_COOLDOWN_MS);
-  const reportCd = report ? await limits.cooldown(`report:${kind}:${id}`, REPORT_COOLDOWN_MS) : null;
-  if (reportCd && !reportCd.ok) return c.json({ error: 'already_reported_recently' }, 429);
-  // Within the observation cooldown a report still counts; only the observation isn't counted again.
-  if (!observe.ok && !report) return c.json({ error: 'observed_recently' }, 429);
-  const ipHash = limits.ipHash;
-  // A report inside the observation cooldown doesn't store these facts, so it
-  // records and returns the score that is stored.
-  if (!observe.ok) {
-    const row = await c.env.DB.prepare('SELECT signals_json FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id).first<{ signals_json: string }>();
-    if (row) score = safeJson<Score>(row.signals_json, score);
-  }
+  if (!observe.ok) return c.json({ error: 'observed_recently' }, 429);
 
-  // An observation updates the stored facts. A report inside the observation
-  // cooldown only adds the report; the row is created if it's new.
-  const db = c.env.DB;
-  const values = [kind, id, name, url, score.score, score.level, score.version, JSON.stringify(stored), JSON.stringify(score), now];
-  const stmts = [
-    observe.ok
-      ? db
-          .prepare(
-            `INSERT INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count, report_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 1, 0)
-             ON CONFLICT (kind, entity_id) DO UPDATE SET
-               name = excluded.name, url = excluded.url, score = excluded.score, level = excluded.level,
-               score_version = excluded.score_version, facts_json = excluded.facts_json, signals_json = excluded.signals_json,
-               last_seen = excluded.last_seen, observation_count = entities.observation_count + 1`,
-          )
-          .bind(...values)
-      : db
-          .prepare(
-            `INSERT OR IGNORE INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count, report_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 1, 0)`,
-          )
-          .bind(...values),
-  ];
-  if (report) {
-    stmts.push(
-      db.prepare('INSERT INTO entity_reports (kind, entity_id, score, ip_hash, created_at) VALUES (?1, ?2, ?3, ?4, ?5)').bind(kind, id, score.score, ipHash, now),
-      db.prepare('UPDATE entities SET report_count = report_count + 1 WHERE kind = ?1 AND entity_id = ?2').bind(kind, id),
-    );
-  }
-  await db.batch(stmts);
-
-  if (observe.ok) await observe.commit();
-  await reportCd?.commit();
+  await c.env.DB.prepare(
+    `INSERT INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, 1)
+     ON CONFLICT (kind, entity_id) DO UPDATE SET
+       name = excluded.name, url = excluded.url, score = excluded.score, level = excluded.level,
+       score_version = excluded.score_version, facts_json = excluded.facts_json, signals_json = excluded.signals_json,
+       last_seen = excluded.last_seen, observation_count = entities.observation_count + 1`,
+  )
+    .bind(kind, id, name, url, score.score, score.level, score.version, JSON.stringify(stored), JSON.stringify(score), now)
+    .run();
+  await observe.commit();
   await day.commit();
 
-  const res: EntityResponse = { ok: true, kind, id, reported: report, score };
+  const res: EntityResponse = { ok: true, kind, id, score };
   return c.json(res, 201);
 });
 
@@ -242,7 +210,11 @@ entities.get('/api/entities/:kind/:id', async (c) => {
   const kind = c.req.param('kind');
   const id = c.req.param('id');
   if (!isKind(kind)) return c.json({ error: 'bad_entity' }, 400);
-  const row = await c.env.DB.prepare('SELECT * FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id).first<EntityRow>();
+  const [rows, countRows] = await c.env.DB.batch([
+    c.env.DB.prepare('SELECT * FROM entities WHERE kind = ?1 AND entity_id = ?2').bind(kind, id),
+    reportCounts(c.env.DB, kind, id),
+  ]);
+  const row = rows?.results[0] as EntityRow | undefined;
   if (!row) return c.json({ error: 'not_found' }, 404);
   const base = {
     id,
@@ -252,7 +224,7 @@ entities.get('/api/entities/:kind/:id', async (c) => {
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
     observations: row.observation_count,
-    reports: row.report_count,
+    counts: countsFrom(countRows?.results[0]),
   };
   let res: EntityRecord;
   if (kind === 'company') {

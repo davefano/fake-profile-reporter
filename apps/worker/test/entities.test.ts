@@ -54,45 +54,34 @@ const post = (body: unknown, ip = '1.1.1.1') =>
 
 describe('POST /api/entities', () => {
   test('stores a company and recomputes its score', async () => {
-    const res = await post({ kind: 'company', id: '4242', facts: company(), report: false, score: { score: 0 } });
+    const res = await post({ kind: 'company', id: '4242', facts: company(), score: { score: 0 } });
     expect(res.status).toBe(201);
     const body = (await res.json()) as any;
     expect(body.score.level).toBe('high'); // ours, not the client's 0
 
     const got = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
-    expect(got).toMatchObject({ name: 'Example Brand Careers', observations: 1, reports: 0 });
+    expect(got).toMatchObject({ name: 'Example Brand Careers', observations: 1, counts: { reports: 0, impersonated: 0, vouches: 0 } });
     expect(got.url).toBe('https://www.linkedin.com/company/example-brand-careers/');
   });
 
-  test('reports a job, scoring it with its company', async () => {
-    const res = await post({ kind: 'job', id: '4400000009', facts: job(), company: company(), report: true });
+  test('stores a job, scoring it with its company', async () => {
+    const res = await post({ kind: 'job', id: '4400000009', facts: job(), company: company() });
     expect(res.status).toBe(201);
     const body = (await res.json()) as any;
     expect(body.score.level).toBe('high');
     expect(body.score.signals.map((s: any) => s.id)).toEqual(expect.arrayContaining(['job.chat-app', 'job.pay-to-work', 'job.company-suspicious']));
     const got = (await (await app.request('/api/entities/job/4400000009', {}, env)).json()) as any;
-    expect(got.reports).toBe(1);
+    expect(got.counts).toEqual({ reports: 0, impersonated: 0, vouches: 0 });
     expect(got.company.slug).toBe('example-brand-careers'); // kept, so the job score can be reproduced
     expect(got.score.missing).toBeArray();
   });
 
-  test('rate limits: one report per IP per day, observations every 10 minutes', async () => {
-    expect((await post({ kind: 'company', id: '4242', facts: company(), report: true })).status).toBe(201);
-    expect((await post({ kind: 'company', id: '4242', facts: company(), report: true })).status).toBe(429);
-    expect((await post({ kind: 'company', id: '4242', facts: company(), report: false })).status).toBe(429);
-    expect((await post({ kind: 'company', id: '4242', facts: company(), report: true }, '2.2.2.2')).status).toBe(201);
+  test('observations are limited to one per entity every 10 minutes per IP', async () => {
+    expect((await post({ kind: 'company', id: '4242', facts: company() })).status).toBe(201);
+    expect((await post({ kind: 'company', id: '4242', facts: company({ name: 'Changed Name' }) })).status).toBe(429);
+    expect((await post({ kind: 'company', id: '4242', facts: company() }, '2.2.2.2')).status).toBe(201);
     const got = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
-    expect(got.reports).toBe(2);
-  });
-
-  test('a report inside the observation cooldown adds the report without overwriting facts', async () => {
-    expect((await post({ kind: 'company', id: '4242', facts: company(), report: false })).status).toBe(201);
-    const stored = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
-    const res = await post({ kind: 'company', id: '4242', facts: company({ name: 'Changed Name', employeesOnLinkedIn: 5000 }), report: true });
-    expect(res.status).toBe(201);
-    expect(((await res.json()) as any).score.score).toBe(stored.score.score); // the stored score, not the new facts'
-    const got = (await (await app.request('/api/entities/company/4242', {}, env)).json()) as any;
-    expect(got).toMatchObject({ name: 'Example Brand Careers', observations: 1, reports: 1 });
+    expect(got).toMatchObject({ name: 'Example Brand Careers', observations: 2 });
   });
 
   test('rejects malformed or mismatched submissions', async () => {

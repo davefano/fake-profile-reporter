@@ -21,10 +21,10 @@ async function account(memberId: number): Promise<AccountResponse> {
   return (await (await app.request(`/api/accounts/${memberId}`, {}, env)).json()) as AccountResponse;
 }
 
-function post(body: unknown, { gzip = false, ip = '1.1.1.1', report = false } = {}) {
+function post(body: unknown, { gzip = false, ip = '1.1.1.1' } = {}) {
   const json = JSON.stringify(body);
   return app.request(
-    report ? '/api/snapshots?report=1' : '/api/snapshots',
+    '/api/snapshots',
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip },
@@ -187,18 +187,22 @@ describe('account current facts', () => {
     expect(listed?.headline).toBe('From B');
   });
 
-  test('the same capture uploaded twice is stored once, and a report on it still counts', async () => {
+  test('the same capture uploaded twice is stored once', async () => {
     const snap = fakeSnapshot({ capturedAt: Date.UTC(2026, 10, 1) });
     expect((await post(snap)).status).toBe(201);
-    // Past the snapshot cooldown: same reporter, same capture, now reported.
+    // Past the snapshot cooldown: same reporter, same capture.
     await env.RATE_KV.put(`cd:snapshot:700000001:${await hashIpFor('1.1.1.1')}`, '0');
-    const res = (await (await post(snap, { report: true })).json()) as any;
-    expect(res.reported).toBe(true);
+    expect((await post(snap)).status).toBe(201);
     const got = await account(700_000_001);
     expect(got.snapshotCount).toBe(1);
     expect(got.snapshots).toHaveLength(1);
-    expect(got.reports).toBe(1);
     expect(env.SNAPSHOTS.objects.size).toBe(1);
+  });
+
+  test('the same account again within 10 minutes is refused', async () => {
+    expect((await post(fakeSnapshot())).status).toBe(201);
+    expect((await post(fakeSnapshot())).status).toBe(429);
+    expect((await account(700_000_001)).snapshotCount).toBe(1);
   });
 
   test('if archiving fails, nothing in the database changes', async () => {
@@ -217,40 +221,6 @@ describe('account current facts', () => {
       const res = await post(snap, { ip: `9.9.9.${String(capturedAt).length}` });
       expect(res.status).toBe(201);
     }
-  });
-});
-
-describe('reports', () => {
-  test('?report=1 saves the snapshot and reports the account; the leaderboard ranks reported accounts', async () => {
-    const res = await post(fakeSnapshot({ memberId: 700_000_001, firstName: 'Alex' }), { report: true });
-    expect(res.status).toBe(201);
-    expect(((await res.json()) as any).reported).toBe(true);
-    await post(fakeSnapshot({ memberId: 700_000_002, firstName: 'Sam' }), { report: true, ip: '1.1.1.1' });
-    await post(fakeSnapshot({ memberId: 700_000_002, firstName: 'Sam' }), { report: true, ip: '2.2.2.2' });
-    await post(fakeSnapshot({ memberId: 700_000_003 })); // tracked, never reported
-
-    const board = (await (await app.request('/api/leaderboard', {}, env)).json()) as any;
-    expect(board.stats).toEqual({ reports: 3, accounts: 2 });
-    expect(board.rows.map((r: any) => [r.memberId, r.reports])).toEqual([[700_000_002, 2], [700_000_001, 1]]);
-    expect(board.rows[0]).toMatchObject({ name: 'Sam Sample', level: 'low', slug: 'jordan-sample-0a1b2c' });
-  });
-
-  test('a report inside the snapshot cooldown answers with the stored score, not the new upload', async () => {
-    const first = (await (await post(fakeSnapshot({ joinedAt: Date.UTC(2012, 0, 15) }))).json()) as any;
-    const fresh = fakeSnapshot({ joinedAt: Date.UTC(2026, 9, 15), headline: 'Recruiter', connections: '2 connections' });
-    const res = (await (await post(fresh, { report: true })).json()) as any;
-    expect(res.reported).toBe(true);
-    expect(res.score.score).toBe(first.score.score);
-    expect((await account(700_000_001)).score).toBe(first.score.score);
-  });
-
-  test('a report still counts inside the snapshot cooldown, but only once a day', async () => {
-    expect((await post(fakeSnapshot())).status).toBe(201); // Track
-    expect((await post(fakeSnapshot(), { report: true })).status).toBe(201); // then Report
-    expect((await post(fakeSnapshot(), { report: true })).status).toBe(429);
-    const got = await account(700_000_001);
-    expect(got.reports).toBe(1);
-    expect(got.snapshotCount).toBe(1);
   });
 });
 

@@ -4,7 +4,7 @@ A crowd-sourced "is this LinkedIn profile fake?" tool. Open source (MIT).
 
 - **Browser extension** (Chrome, Firefox, Safari via [WXT](https://wxt.dev)) —
   grades the LinkedIn profile you're viewing with rule-based signals and lets
-  you save or report it, in your browser or to a server.
+  you save it, report it, or vouch for it, in your browser or to a server.
 - **API** ([Hono](https://hono.dev) on Cloudflare Workers + D1/SQLite) —
   stores reports for the extension. It has no public web page.
 
@@ -23,7 +23,8 @@ packages/core/         shared by everything (TypeScript, no runtime deps); see d
   src/wire.ts          API request/response types shared by the extension and the worker
 tools/capture/         research CLI: profiles (via agent-browser), companies and jobs (public pages)
 apps/worker/           the API (Hono on Cloudflare Workers)
-  src/accounts.ts      profile snapshots, reports, accounts, leaderboard
+  src/accounts.ts      profile snapshots, accounts, leaderboard
+  src/reports.ts       reports and vouches: create, edit, withdraw
   src/entities.ts      company pages and job postings
   src/limits.ts        per-reporter rate limits (salted IP hash)
   schema.sql           database schema
@@ -85,16 +86,30 @@ Track and Report always keep a copy in the browser. Settings › Your saves
 exports them as one JSON file and imports such a file back, and offers once per
 server to upload saves made before it was connected.
 
+**Reports.** "Report or vouch" says one of three things about a page:
+- **Looks suspicious**, with reasons and "I suspect it" or "I confirmed it".
+- **Someone used this person's identity** (profiles only). It's shown as a
+  warning and never counts against the profile's owner.
+- **I know this is real**: a vouch.
+
+Each also takes an optional note, which the server stores for building
+heuristics and never shows to anyone. You can edit or withdraw what you said.
+The extension makes a random reporter key on first use and sends it with every
+report; the server stores only its hash, so only that browser can change its
+reports. The export file carries the key, so treat it like a password.
+
 ## API
 
 | Method | Path                | Purpose                                    |
 |--------|---------------------|--------------------------------------------|
-| POST   | `/api/snapshots[?report=1]` | Store a raw profile snapshot (JSON or gzip) → R2 + D1; returns the score and changes. With `report=1`, also reports the account |
-| GET    | `/api/accounts/:memberId` | Latest facts, slug history, snapshot history, report count |
+| POST   | `/api/snapshots` | Store a raw profile snapshot (JSON or gzip) → R2 + D1; returns the score and changes |
+| GET    | `/api/accounts/:memberId` | Latest facts, slug history, snapshot history, report counts |
 | GET    | `/api/accounts?slug=` | Same, by any slug the account has used   |
-| GET    | `/api/leaderboard`  | Reported accounts, by reports then score, `?limit=100` |
-| POST   | `/api/entities`     | Save a company or job `{ kind, id, facts, company?, report }`; the score is recomputed server-side |
+| GET    | `/api/leaderboard`  | Profiles reported as suspicious, by reports then score, `?limit=100` |
+| POST   | `/api/entities`     | Save a company or job `{ kind, id, facts, company? }`; the score is recomputed server-side |
 | GET    | `/api/entities/:kind/:id` | Latest facts, score, observation and report counts |
+| PUT    | `/api/reports/:kind/:id` | Report, flag impersonation, or vouch: `{ stance, reasons, confidence?, note? }` with header `x-reporter-key`. One per reporter per saved target (`kind` is `profile`, `company` or `job`; a profile's `id` is its member ID); sending again edits it |
+| DELETE | `/api/reports/:kind/:id` | Withdraw this reporter's report |
 | GET    | `/api/health`       | Health check                               |
 
 Request and response types are in `packages/core/src/wire.ts`.
@@ -106,9 +121,14 @@ re-scores every snapshot itself, and drops viewer-relative data (mutual
 connections) before storing it. An older snapshot uploaded late is stored but
 never overwrites newer facts.
 
-Each reporter may save an account once per 10 minutes, report it once per day,
-and make 200 saves or reports per day. IPs are never stored raw, only
-`sha256(salt + ip)`.
+Each IP may save an account, company or job once per 10 minutes, and make 200
+saves and 200 report changes per day. IPs and reporter keys are never stored
+raw, only salted SHA-256 hashes.
+
+Schema changes for a database that's already live are in
+`apps/worker/migrations/`, applied once each with
+`wrangler d1 execute fpr --remote --file=./migrations/<file>`; `schema.sql` is
+always the full current schema for a fresh database.
 
 ## Capturing and scoring profiles, companies, and jobs (research)
 

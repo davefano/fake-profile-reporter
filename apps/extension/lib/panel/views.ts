@@ -1,5 +1,6 @@
 // HTML for a scan result. Pure functions of the scan; all text is escaped.
 
+import { reportMarkup } from './report-form';
 import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
 import type { RiskLevel, Score, Signal } from '@fpr/core/scam';
 import type { CompanyScan, JobScan, ProfileScan, ScanResult } from '@/lib/scan/messages';
@@ -74,12 +75,13 @@ function signalsBlock(s: Score) {
 }
 
 function actions(r: ScanResult) {
-  const track = `Save this ${NOUN[r.kind]} without reporting it`;
+  const track = `Save this ${NOUN[r.kind]} without saying anything about it`;
   return `<div class="actions">
+    ${reportMarkup(r.kind)}
     <p class="status" id="submitStatus" role="status"></p>
     <div class="btn-row">
       <button class="btn secondary" id="trackBtn" title="${track}">Track</button>
-      <button class="btn danger" id="reportBtn">Report ${r.kind === 'job' ? 'this job' : r.kind === 'company' ? 'this company' : 'as suspicious'}</button>
+      <button class="btn danger" id="reportBtn">Report or vouch</button>
     </div>
   </div>`;
 }
