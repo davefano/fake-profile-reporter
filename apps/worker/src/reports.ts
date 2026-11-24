@@ -11,16 +11,18 @@
 // Notes are stored for building heuristics and never returned.
 
 import { Hono, type Context } from 'hono';
-import { cleanReport, scoreProfile, type ReportKind, type ReportResponse, type Score, type WithdrawResponse } from '@fpr/core';
+import { cleanReport, scoreProfile, type ReportKind, type ReportResponse, type StoredScore, type WithdrawResponse } from '@fpr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
-import { hashReporter, REPORTER_KEY } from './ip';
+import { clientIp, hashIp, hashReporter, REPORTER_KEY } from './ip';
 import { safeJson } from './json';
-import { reporterLimits } from './limits';
+import { countDaily } from './limits';
 import { countsFrom, reportCounts } from './reports-store';
 
 const MAX_BODY = 8 * 1024;
-const DAILY_LIMIT = 200; // reports, edits and withdrawals per IP per day
+// Reports and edits per UTC day. Withdrawals don't count.
+const REPORTS_PER_REPORTER = 50;
+const REPORTS_PER_IP = 200;
 
 export const reports = new Hono<{ Bindings: Env }>();
 
@@ -38,13 +40,13 @@ async function who(c: Context<{ Bindings: Env }>) {
 }
 
 /** The target's score now, or null if it was never saved. */
-async function targetScore(env: Env, kind: ReportKind, id: string): Promise<Score | null> {
+async function targetScore(env: Env, kind: ReportKind, id: string): Promise<StoredScore | null> {
   if (kind === 'profile') {
     const current = await createAccountStore(env.DB).current(Number(id));
     return current ? scoreProfile(current.facts, current.capturedAt) : null;
   }
   const row = await env.DB.prepare('SELECT signals_json FROM entities WHERE kind = ? AND entity_id = ?').bind(kind, id).first<{ signals_json: string }>();
-  return row ? safeJson<Score | null>(row.signals_json, null) : null;
+  return row ? safeJson<StoredScore | null>(row.signals_json, null) : null;
 }
 
 reports.put('/api/reports/:kind/:id', async (c) => {
@@ -64,9 +66,16 @@ reports.put('/api/reports/:kind/:id', async (c) => {
   if ('error' in r) return c.json({ error: r.error }, 400);
 
   const now = Date.now();
-  const limits = await reporterLimits(c, now);
-  const day = await limits.daily('reports', DAILY_LIMIT);
-  if (!day.ok) return c.json({ error: 'daily_limit_reached' }, 429);
+  const ipHash = await hashIp(clientIp(c.req.raw), c.env.IP_SALT);
+  const within = await countDaily(
+    c.env.DB,
+    [
+      { scope: 'reports.reporter', subject: reporter, max: REPORTS_PER_REPORTER },
+      { scope: 'reports.ip', subject: ipHash, max: REPORTS_PER_IP },
+    ],
+    now,
+  );
+  if (!within) return c.json({ error: 'daily_limit_reached' }, 429);
 
   const score = await targetScore(c.env, kind, id);
   if (!score) return c.json({ error: 'not_saved' }, 404);
@@ -84,11 +93,10 @@ reports.put('/api/reports/:kind/:id', async (c) => {
            created_at = CASE WHEN reports.withdrawn_at IS NULL THEN reports.created_at ELSE excluded.created_at END,
            updated_at = excluded.updated_at, withdrawn_at = NULL`,
       )
-      .bind(kind, id, reporter, r.stance, JSON.stringify(r.reasons), r.confidence, r.note, JSON.stringify(score), limits.ipHash, now),
+      .bind(kind, id, reporter, r.stance, JSON.stringify(r.reasons), r.confidence, r.note, JSON.stringify(score), ipHash, now),
     db.prepare('SELECT created_at, updated_at FROM reports WHERE kind = ? AND target_id = ? AND reporter = ?').bind(kind, id, reporter),
     reportCounts(db, kind, id),
   ]);
-  await day.commit();
   const row = rowRes?.results[0] as { created_at: number; updated_at: number } | undefined;
   const res: ReportResponse = {
     ok: true,
@@ -109,17 +117,12 @@ reports.delete('/api/reports/:kind/:id', async (c) => {
   if ('error' in w) return w.error;
   const { kind, id, reporter } = w;
   const now = Date.now();
-  const limits = await reporterLimits(c, now);
-  const day = await limits.daily('reports', DAILY_LIMIT);
-  if (!day.ok) return c.json({ error: 'daily_limit_reached' }, 429);
-
   const db = c.env.DB;
   const [upd, countRes] = await db.batch([
     db.prepare('UPDATE reports SET withdrawn_at = ? WHERE kind = ? AND target_id = ? AND reporter = ? AND withdrawn_at IS NULL').bind(now, kind, id, reporter),
     reportCounts(db, kind, id),
   ]);
   if (!(upd?.meta?.changes ?? 0)) return c.json({ error: 'not_reported' }, 404);
-  await day.commit();
   const res: WithdrawResponse = { ok: true, counts: countsFrom(countRes?.results[0]) };
   return c.json(res);
 });

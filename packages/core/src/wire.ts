@@ -11,6 +11,21 @@ import type { RiskLevel, Score } from './scam/signals';
 
 export type ApiError = { error: string };
 
+/**
+ * HTTP 410 error codes. `upgrade_required`: a build up to 2026.11.23.1 sent a
+ * report the old way (`?report=1` or `report: true`); nothing was stored.
+ * `removed`: the profile was removed at its owner's request.
+ */
+export type GoneError = 'upgrade_required' | 'removed';
+
+/**
+ * A Score as read back from storage (entity rows, snapshot `signals_json`,
+ * report `score_json`, a scan cache): it may come from older rules, so its
+ * version is any number and its signals may lack the newer optional fields.
+ * Show its stored level; never re-derive it.
+ */
+export type StoredScore = Omit<Score, 'version'> & { version: number };
+
 /** POST /api/snapshots — body is a RawSnapshot, JSON or gzipped JSON. */
 export interface SnapshotResponse {
   ok: true;
@@ -67,7 +82,7 @@ interface EntityRecordBase {
   id: string;
   name: string | null;
   url: string;
-  score: Score;
+  score: StoredScore;
   firstSeen: number;
   lastSeen: number;
   observations: number;

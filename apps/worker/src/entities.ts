@@ -11,7 +11,7 @@
 // score used, so the score can be reproduced.
 
 import { Hono } from 'hono';
-import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type EntityRecord, type EntityResponse, type JobExtras, type JobFacts, type Score } from '@fpr/core';
+import { scoreCompany, scoreJob, type CompanyExtras, type CompanyFacts, type EntityRecord, type EntityResponse, type GoneError, type JobExtras, type JobFacts, type Score, type StoredScore } from '@fpr/core';
 import type { Env } from './env';
 import { safeJson } from './json';
 import { reporterLimits } from './limits';
@@ -152,6 +152,8 @@ entities.post('/api/entities', async (c) => {
   } catch {
     return c.json({ error: 'bad_json' }, 400);
   }
+  // Builds up to 2026.11.23.1 reported with this flag. Refuse before storing anything.
+  if (body?.report === true) return c.json({ error: 'upgrade_required' satisfies GoneError }, 410);
   const kind = body?.kind;
   const id = typeof body?.id === 'string' ? body.id : '';
   if (!isKind(kind) || !/^[\w-]{1,200}$/.test(id)) return c.json({ error: 'bad_entity' }, 400);
@@ -220,7 +222,7 @@ entities.get('/api/entities/:kind/:id', async (c) => {
     id,
     name: row.name,
     url: row.url,
-    score: safeJson<Score>(row.signals_json, { score: row.score, level: row.level as Score['level'], version: row.score_version as Score['version'], signals: [], missing: [] }),
+    score: safeJson<StoredScore>(row.signals_json, { score: row.score, level: row.level as StoredScore['level'], version: row.score_version, signals: [], missing: [] }),
     firstSeen: row.first_seen,
     lastSeen: row.last_seen,
     observations: row.observation_count,

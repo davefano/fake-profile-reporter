@@ -31,6 +31,11 @@ class Statement {
     const q = this.db.query(this.sql);
     // In a batch, D1 returns rows for SELECTs and change counts for writes.
     if (/^\s*select/i.test(this.sql)) return { results: q.all(...this.params), success: true, meta: { changes: 0 } };
+    // A write with RETURNING returns its rows too.
+    if (/\breturning\b/i.test(this.sql)) {
+      const results = q.all(...this.params);
+      return { results, success: true, meta: { changes: results.length } };
+    }
     const r = q.run(...this.params);
     return { results: [], success: true, meta: { changes: r.changes } };
   }

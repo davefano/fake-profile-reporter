@@ -9,7 +9,7 @@
 // score is never trusted.
 
 import { Hono, type Context } from 'hono';
-import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type RawSnapshot, type Score, type SnapshotResponse } from '@fpr/core';
+import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type GoneError, type RawSnapshot, type Score, type SnapshotResponse } from '@fpr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';
@@ -30,6 +30,8 @@ async function sha256(text: string): Promise<string> {
 }
 
 accounts.post('/api/snapshots', async (c) => {
+  // Builds up to 2026.11.23.1 reported with ?report=1. Refuse before storing anything.
+  if (c.req.query('report') === '1') return c.json({ error: 'upgrade_required' satisfies GoneError }, 410);
   if (Number(c.req.header('content-length') || 0) > MAX_BYTES) return c.json({ error: 'too_large' }, 413);
   const body = new Uint8Array(await c.req.arrayBuffer());
   if (body.byteLength > MAX_BYTES) return c.json({ error: 'too_large' }, 413);

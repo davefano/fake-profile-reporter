@@ -224,6 +224,26 @@ describe('account current facts', () => {
   });
 });
 
+describe('old extension builds', () => {
+  // Builds up to 2026.11.23.1 reported through ?report=1 on the snapshot upload.
+  test('a report through the old path is refused with upgrade_required, and nothing is stored', async () => {
+    const res = await app.request(
+      '/api/snapshots?report=1',
+      { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': '1.1.1.1' }, body: JSON.stringify(fakeSnapshot()) },
+      env,
+    );
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ error: 'upgrade_required' });
+    expect(env.SNAPSHOTS.objects.size).toBe(0);
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM account_snapshots').first()).toEqual({ n: 0 });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM accounts').first()).toEqual({ n: 0 });
+  });
+
+  test('a plain save from an old build still works', async () => {
+    expect((await post(fakeSnapshot())).status).toBe(201);
+  });
+});
+
 test('GET /api/accounts 404s for unknown accounts', async () => {
   expect((await app.request('/api/accounts/123', {}, env)).status).toBe(404);
   expect((await app.request('/api/accounts?slug=nobody', {}, env)).status).toBe(404);

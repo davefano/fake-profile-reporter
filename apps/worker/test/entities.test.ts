@@ -94,6 +94,27 @@ describe('POST /api/entities', () => {
     expect(r.status).toBe(400);
   });
 
+  test('a report through the old path (report: true) is refused with upgrade_required, and nothing is stored', async () => {
+    const res = await post({ kind: 'company', id: '4242', facts: company(), report: true });
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ error: 'upgrade_required' });
+    expect(await env.DB.prepare('SELECT COUNT(*) AS n FROM entities').first()).toEqual({ n: 0 });
+    // Without the flag, the same save from an old build is accepted.
+    expect((await post({ kind: 'company', id: '4242', facts: company() })).status).toBe(201);
+  });
+
+  test('a score stored under older rules is returned as stored, with its level', async () => {
+    // Version 5: no strength, detail or floor on its signals.
+    const v5 = { version: 5, score: 12, level: 'medium', signals: [{ id: 'company.size-gap', label: 'Claims far more staff than are on LinkedIn', weight: 15, kind: 'discrepancy' }], missing: [] };
+    await env.DB.prepare(
+      `INSERT INTO entities (kind, entity_id, name, url, score, level, score_version, facts_json, signals_json, first_seen, last_seen, observation_count)
+       VALUES ('company', '4242', 'Example Brand Careers', 'https://www.linkedin.com/company/example-brand-careers/', 12, 'medium', 5, ?1, ?2, 1, 1, 1)`,
+    ).bind(JSON.stringify(company()), JSON.stringify(v5)).run();
+    const res = await app.request('/api/entities/company/4242', {}, env);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).score).toEqual(v5);
+  });
+
   test('unknown entities are 404', async () => {
     expect((await app.request('/api/entities/job/1', {}, env)).status).toBe(404);
   });

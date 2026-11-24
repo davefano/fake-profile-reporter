@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import type { CompanyFacts } from '@fpr/core';
 import { fakeSnapshot } from '@fpr/core/test/fixtures';
 import app from '../src/index';
@@ -167,5 +167,44 @@ describe('PUT /api/reports', () => {
       expect(pre.headers.get('access-control-allow-methods')).toContain(method);
       expect(pre.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('x-reporter-key');
     }
+  });
+});
+
+describe('daily report caps', () => {
+  afterEach(() => setSystemTime());
+  const keys = (n: number) => Array.from({ length: n }, (_, i) => `k${i}`.padEnd(40, 'x'));
+  const statuses = async (reqs: Array<Response | Promise<Response>>) => {
+    const res = await Promise.all(reqs);
+    const bodies = (await Promise.all(res.map((r) => r.json()))) as any[];
+    return { ok: res.filter((r) => r.status === 200).length, limited: bodies.filter((b) => b.error === 'daily_limit_reached').length };
+  };
+
+  test('60 reports at once from one key, with a cap of 50 a day: exactly 50 count', async () => {
+    await saveProfile(700_000_001);
+    const got = await statuses(Array.from({ length: 60 }, () => put('profile', 700_000_001, suspicious, KEY_A)));
+    expect(got).toEqual({ ok: 50, limited: 10 });
+  });
+
+  test('205 reports at once from one IP across keys, with a cap of 200 a day: exactly 200 count', async () => {
+    await saveProfile(700_000_001);
+    const got = await statuses(keys(5).flatMap((k) => Array.from({ length: 41 }, () => put('profile', 700_000_001, suspicious, k))));
+    expect(got).toEqual({ ok: 200, limited: 5 });
+  });
+
+  test('withdrawing still works past the cap, and is not counted', async () => {
+    await saveProfile(700_000_001);
+    for (let i = 0; i < 50; i++) await put('profile', 700_000_001, suspicious, KEY_A);
+    expect((await put('profile', 700_000_001, suspicious, KEY_A)).status).toBe(429);
+    expect((await withdraw('profile', 700_000_001, KEY_A)).status).toBe(200);
+  });
+
+  test("yesterday's counts don't count today, and are deleted on today's first report", async () => {
+    await saveProfile(700_000_001);
+    setSystemTime(new Date(Date.UTC(2026, 10, 23, 12)));
+    for (let i = 0; i < 51; i++) await put('profile', 700_000_001, suspicious, KEY_A);
+    expect((await put('profile', 700_000_001, suspicious, KEY_A)).status).toBe(429);
+    setSystemTime(new Date(Date.UTC(2026, 10, 24, 0, 0, 1)));
+    expect((await put('profile', 700_000_001, suspicious, KEY_A)).status).toBe(200);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM daily_counts WHERE day < '2026-11-24'").first()).toEqual({ n: 0 });
   });
 });
