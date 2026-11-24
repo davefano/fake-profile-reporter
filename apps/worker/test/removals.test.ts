@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fakeSnapshot } from '@fpr/core/test/fixtures';
 import app from '../src/index';
 import type { Env } from '../src/env';
+import { hashReporter } from '../src/ip';
 import { createTestD1, createTestKv, createTestR2 } from './d1-sqlite';
 
 const MEMBER = 700_000_001;
@@ -142,6 +143,14 @@ describe('POST /api/removals', () => {
     const res = await ask();
     expect(res.status).toBe(403);
     expect(((await res.json()) as any).error).toBe('verification_required');
+  });
+
+  test('unverified attempts, such as a bot check left open and renewed, use none of the daily cap', async () => {
+    env = { ...env, VERIFY_HOST: 'api.example.test', TURNSTILE_SITEKEY: 'site', TURNSTILE_SECRET: 'secret' };
+    for (let i = 0; i < 5; i++) expect((await ask()).status).toBe(403);
+    const reporter = await hashReporter(KEY_A, 'test');
+    await env.DB.prepare('INSERT INTO verified_reporters (reporter, verified_at, expires_at) VALUES (?, ?, ?)').bind(reporter, Date.now(), Date.now() + DAY).run();
+    expect((await ask()).status).toBe(201);
   });
 
   test('validates the key and body', async () => {

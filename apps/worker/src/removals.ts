@@ -36,6 +36,7 @@ const RETAIN_MS = 90 * DAY_MS; // contacts on pending requests, and decided requ
 const ORPHAN_SWEEP_MS = 7 * DAY_MS; // approvals the admin list sweeps R2 for again
 const REQUESTS_PER_REPORTER = 3;
 const REQUESTS_PER_IP = 5;
+const UNVERIFIED_PER_IP = 100; // bot-check challenges issued to one IP a day for removal requests
 const MAX_PENDING = 100;
 const ADMIN_FAILS_PER_IP = 10;
 const MIN_ADMIN_TOKEN = 43; // 32 random bytes, base64url
@@ -77,6 +78,14 @@ removals.post('/api/removals', async (c) => {
   const db = c.env.DB;
   const reporter = await hashReporter(key, c.env.IP_SALT);
   const ipHash = await hashIp(clientIp(c.req.raw), c.env.IP_SALT);
+  // Check the bot check first, so an unverified attempt (a check left open and
+  // renewed every few minutes) doesn't use up the small daily allowance.
+  // Unverified attempts each create a challenge, so they have their own cap.
+  const gate = await requireVerified(c, reporter, now);
+  if (gate) {
+    const ok = await countDaily(db, [{ scope: 'removals.unverified.ip', subject: ipHash, max: UNVERIFIED_PER_IP }], now);
+    return ok ? gate : c.json({ error: 'daily_limit_reached' }, 429);
+  }
   const within = await countDaily(
     db,
     [
@@ -86,8 +95,6 @@ removals.post('/api/removals', async (c) => {
     now,
   );
   if (!within) return c.json({ error: 'daily_limit_reached' }, 429);
-  const gate = await requireVerified(c, reporter, now);
-  if (gate) return gate;
 
   // ?1 member, ?2 reporter, ?3 IP hash, ?7 denials since, ?8 pending cap. The
   // insert carries every rule, so parallel requests can't slip past one; the
