@@ -5,6 +5,7 @@ import { isError } from '@/lib/runtime';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
 import { countsText } from './report-form';
+import { levelTag, listTitle } from './saved';
 import { avatar } from './views';
 
 let boardLoaded = false;
@@ -14,7 +15,7 @@ export const invalidateLeaderboard = () => (boardLoaded = false);
 
 export async function loadLeaderboard(list: HTMLElement) {
   if (boardLoaded) return;
-  list.innerHTML = '<div class="skel row"></div>'.repeat(5);
+  list.innerHTML = `<div class="skel-list" aria-busy="true"><div class="skel w40"></div>${'<div class="skel-row"><div class="skel av"></div><div class="skel-lines"><div class="skel w70"></div><div class="skel w40"></div></div><div class="skel tg"></div></div>'.repeat(5)}<p class="loading-step" role="status">Loading reports…</p></div>`;
   const res = await sendMessage<'FPR_LEADERBOARD'>({ type: 'FPR_LEADERBOARD' }).catch(() => undefined);
   const rows: LeaderboardRow[] | undefined = res && !isError(res) ? res.rows : undefined;
   if (!rows) {
@@ -25,15 +26,15 @@ export async function loadLeaderboard(list: HTMLElement) {
     list.innerHTML = '<div class="empty"><h2>No reports yet</h2><p>Profiles reported as suspicious on this server show up here.</p></div>';
     return;
   }
-  list.innerHTML = `<ol class="board">${rows
+  list.innerHTML = `<section class="sec">${listTitle('Reported profiles', rows.length)}<ol class="board">${rows
     .map((r, i) => {
       return `<li>
         <span class="rank">${i + 1}</span>
         ${avatar(null, r.name, 'sm')}
         <a class="b-name" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.name)}<small>${esc(countsText(r))}</small></a>
-        <span class="b-score level-${r.level}">${r.score}</span>
+        ${levelTag(r.level)}
       </li>`;
     })
-    .join('')}</ol>`;
+    .join('')}</ol></section>`;
   boardLoaded = true;
 }

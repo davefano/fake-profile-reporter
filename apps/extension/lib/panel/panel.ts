@@ -41,22 +41,22 @@ const MARKUP = `
 
 <main>
   <section id="view-scan" class="view active">
-    <div id="state-loading" class="hidden">
-      <div class="skel-hero"><div class="skel circle"></div><div class="skel-lines"><div class="skel w70"></div><div class="skel w90"></div><div class="skel w40"></div></div></div>
-      <div class="skel-score"><div class="skel num"></div><div class="skel-lines"><div class="skel w40"></div><div class="skel w90"></div></div></div>
-      <div class="skel bar"></div>
-      <div class="skel-grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+    <div id="state-loading" class="hidden" aria-busy="true">
+      <div class="skel-hero"><div class="skel av"></div><div class="skel-lines"><div class="skel w70"></div><div class="skel w90"></div><div class="skel w40"></div></div></div>
+      <div class="skel-lvl"><div class="skel tg"></div><div class="skel-lines"><div class="skel head w70"></div><div class="skel w90"></div></div></div>
+      <div class="skel-bal"><div class="skel w40"></div><div class="skel gauge"></div><div class="skel w40"></div><div class="skel gauge"></div></div>
+      <div class="skel-grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
       <p class="loading-step" id="loadingStep" role="status">Reading the page…</p>
     </div>
 
     <div id="state-empty" class="hidden">
       <div class="empty">
         <svg class="empty-art" viewBox="0 0 120 96" aria-hidden="true">
-          <rect x="14" y="14" width="76" height="62" rx="10" fill="var(--raised)" stroke="var(--line)" stroke-width="2"/>
-          <circle cx="38" cy="38" r="10" fill="var(--line)"/>
-          <rect x="54" y="32" width="26" height="5" rx="2.5" fill="var(--line)"/>
-          <rect x="54" y="42" width="18" height="5" rx="2.5" fill="var(--line)"/>
-          <rect x="26" y="58" width="52" height="5" rx="2.5" fill="var(--line)"/>
+          <rect x="14" y="14" width="76" height="62" rx="4" fill="var(--raised)" stroke="var(--line2)" stroke-width="2"/>
+          <rect x="26" y="28" width="20" height="20" rx="2" fill="var(--line2)"/>
+          <rect x="54" y="30" width="26" height="5" rx="1" fill="var(--line2)"/>
+          <rect x="54" y="41" width="18" height="5" rx="1" fill="var(--line2)"/>
+          <rect x="26" y="58" width="52" height="5" rx="1" fill="var(--line2)"/>
           <circle cx="86" cy="62" r="14" fill="var(--bg)" stroke="var(--accent)" stroke-width="3.5"/>
           <path d="m96 72 10 10" stroke="var(--accent)" stroke-width="4.5" stroke-linecap="round"/>
         </svg>
@@ -66,7 +66,7 @@ const MARKUP = `
     </div>
 
     <div id="state-error" class="hidden">
-      <div class="empty">
+      <div class="empty error">
         <h2 id="errorTitle">Couldn't read this profile</h2>
         <p id="errorText"></p>
         <button id="retry" class="btn secondary">Try again</button>
@@ -137,7 +137,7 @@ async function scan(force = false) {
 // --- actions ---------------------------------------------------------------------
 function bindResult() {
   if (!current) return;
-  $('trackBtn').addEventListener('click', track);
+  $('trackBtn').addEventListener('click', saveOnly);
   const where = () => (settings && serverBase(settings) ? destinationLabel(settings) : null);
   mountReport(scanKey(current), current.kind, where, invalidateLeaderboard);
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
@@ -153,7 +153,7 @@ function bindResult() {
 }
 
 /** Save without saying anything about it. */
-async function track() {
+async function saveOnly() {
   if (!current) return;
   const btn = $<HTMLButtonElement>('trackBtn');
   const status = $('submitStatus');
@@ -180,7 +180,7 @@ async function track() {
     return;
   }
   btn.disabled = !!res.savedLocally;
-  btn.textContent = res.savedLocally ? 'Saved ✓' : 'Track';
+  btn.textContent = res.savedLocally ? 'Saved ✓' : 'Save';
   status.className = 'status err';
   const MSG: Record<string, string> = {
     daily_limit_reached: 'Daily limit reached. Try again tomorrow.',

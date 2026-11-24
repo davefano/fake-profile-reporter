@@ -23,7 +23,7 @@ const NOUN = { profile: 'profile', company: 'company page', job: 'job posting' }
 
 const TITLE: Record<RiskLevel, string> = { high: 'High suspicion', medium: 'Some concerns', low: 'Low suspicion' };
 const TAG: Record<RiskLevel, string> = { high: 'HI', medium: 'MED', low: 'LO' };
-const LEVEL: Record<RiskLevel, string> = { high: 'High', medium: 'Medium', low: 'Low' };
+export const LEVEL: Record<RiskLevel, string> = { high: 'High', medium: 'Medium', low: 'Low' };
 const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
 
 // --- signals ---------------------------------------------------------------------
@@ -180,12 +180,12 @@ function readNotes(r: ScanResult) {
 }
 
 function actions(r: ScanResult) {
-  const track = `Save this ${NOUN[r.kind]} without saying anything about it`;
+  const save = `Save this ${NOUN[r.kind]} without saying anything about it`;
   return `<div class="actions">
     ${reportMarkup(r.kind)}
     <p class="status" id="submitStatus" role="status"></p>
     <div class="btn-row">
-      <button class="btn secondary" id="trackBtn" title="${track}">Track</button>
+      <button class="btn secondary" id="trackBtn" title="${save}">Save</button>
       <button class="btn danger" id="reportBtn">Report or vouch</button>
     </div>
   </div>`;
