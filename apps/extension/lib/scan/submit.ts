@@ -5,7 +5,7 @@
 import type { ReportRequest, VerifyResponse } from '@fpr/core/wire';
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { getSettings, serverBase } from '@/lib/saves/settings';
-import { localSaves, type LocalReport, type SavedItem, type SavedPayload } from '@/lib/saves/store';
+import { localSaves, ownerChanged, type LocalReport, type SavedItem, type SavedPayload } from '@/lib/saves/store';
 import { ALREADY, reconcile, saveOn, serial, upload, verifyToken, waitForVerified, withdrawItem, type SyncResult } from '@/lib/saves/upload';
 import type { ScanResult, SubmitResponse, VerifyWaitResult, WithdrawResult } from './messages';
 import { cachedScan, cachedSnapshot } from './scan';
@@ -39,11 +39,16 @@ export async function submit(key: string, report?: ReportRequest): Promise<Submi
   return serial(key, async () => {
     const saves = localSaves();
     const now = Date.now();
-    const prev = await saves.get(key);
+    let prev = await saves.get(key);
+    const described = describe(scan);
+    const moved = ownerChanged(prev, described.targetId);
+    if (moved) {
+      await saves.put(moved);
+      prev = undefined;
+    }
     const said: LocalReport | null = report
       ? { stance: report.stance, reasons: report.reasons, confidence: report.stance === 'report' ? (report.confidence ?? 'suspected') : null, note: report.note?.trim() || null, at: now }
       : null;
-    const described = describe(scan);
     // What you said goes in first, before any request.
     const item: SavedItem = {
       key,

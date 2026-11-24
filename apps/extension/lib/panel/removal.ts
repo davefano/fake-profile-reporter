@@ -132,7 +132,7 @@ export const removalMarkup = () => `<section class="me" id="removal">${LINK}</se
 const failed = (e: unknown): ApiError => panelError(e);
 
 /** Wire the removal request for the profile `memberId` in `box`. `dest` reads Settings › Save to. */
-export async function mountRemoval(box: HTMLElement, memberId: number, dest: () => Destination) {
+export async function mountRemoval(box: HTMLElement, memberId: number, dest: () => Destination, page: AbortSignal) {
   const store = localRemovals();
   let check: AbortController | null = null;
   const q = <T extends HTMLElement = HTMLElement>(sel: string) => box.querySelector<T>(sel)!;
@@ -238,8 +238,9 @@ export async function mountRemoval(box: HTMLElement, memberId: number, dest: () 
       done = out;
       return null;
     };
-    const passed = await mountCheck(q('#meCheck'), { server, verifyUrl, renew, signal: ctl.signal });
-    if (ctl.signal.aborted) return;
+    // A replaced result stops the check too.
+    const passed = await mountCheck(q('#meCheck'), { server, verifyUrl, renew, signal: AbortSignal.any([ctl.signal, page]) });
+    if (ctl.signal.aborted || page.aborted) return;
     check = null;
     busy(false);
     if (!passed) return;

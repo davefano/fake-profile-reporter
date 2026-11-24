@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { normalizeServer } from '../lib/saves/settings';
-import { exportFile, mergeItem, parseExport, pendingFor, reportsPendingFor, saveStore, type Area, type LocalReport, type SavedItem } from '../lib/saves/store';
+import { exportFile, mergeItem, ownerChanged, parseExport, pendingFor, reportsPendingFor, saveStore, type Area, type LocalReport, type SavedItem } from '../lib/saves/store';
 
 function fakeArea(): Area {
   const data = new Map<string, unknown>();
@@ -125,6 +125,24 @@ describe('reports', () => {
     // A newer report beats an older withdrawal, and keeps what's confirmed for it.
     const back = mergeItem(have, item({ report: report({ at: 7_000 }), heldBy: { 'https://b.example': 7_000 } }));
     expect(back).toMatchObject({ report: report({ at: 7_000 }), withdrawnAt: null, heldBy: { 'https://a.example': null, 'https://b.example': 7_000 } });
+  });
+});
+
+describe('ownerChanged', () => {
+  const profile = (o: Partial<SavedItem> = {}) =>
+    item({ key: 'profile:some-slug', kind: 'profile', targetId: '111', url: 'https://www.linkedin.com/in/some-slug/', payload: { kind: 'profile', snapshotGzipBase64: 'H4sI' }, ...o });
+
+  test('a profile URL now on another member: the old save moves to its own key, with its report and servers', () => {
+    const prev = profile({ report: report(), heldBy: { 'https://a.example': 4_000 } });
+    expect(ownerChanged(prev, '222')).toEqual({ ...prev, key: 'profile:some-slug#111' });
+  });
+
+  test('the same member, an unknown ID, or a company: nothing moves', () => {
+    expect(ownerChanged(profile(), '111')).toBeNull();
+    expect(ownerChanged(profile({ targetId: null }), '222')).toBeNull();
+    expect(ownerChanged(profile(), null)).toBeNull();
+    expect(ownerChanged(undefined, '222')).toBeNull();
+    expect(ownerChanged(item(), '9999')).toBeNull();
   });
 });
 

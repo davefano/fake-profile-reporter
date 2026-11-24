@@ -142,6 +142,18 @@ export function mergeItem(have: SavedItem | undefined, incoming: SavedItem): Sav
   return JSON.stringify(next) === JSON.stringify(have) ? have : next;
 }
 
+/**
+ * A profile URL can pass to another member (a vanity URL given up and taken).
+ * When the save under `key` was of a different member than `targetId`, it
+ * moves to a key of its own, with its report and the servers that hold it,
+ * so nothing said about that member carries over to the new one. Returns the
+ * moved save, or null when it is the same member (or either ID is unknown).
+ */
+export function ownerChanged(prev: SavedItem | undefined, targetId: string | null): SavedItem | null {
+  if (!prev || prev.kind !== 'profile' || !prev.targetId || !targetId || prev.targetId === targetId) return null;
+  return { ...prev, key: `${prev.key}#${prev.targetId}` };
+}
+
 /** Saves not yet sent to `server`. */
 export const pendingFor = (items: SavedItem[], server: string) => items.filter((i) => !i.uploadedTo.includes(server));
 

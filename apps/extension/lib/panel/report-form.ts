@@ -125,10 +125,13 @@ export interface Destination {
 
 /**
  * Wire the report controls for the page in `key`. `dest` reads Settings ›
- * Save to; `onChange` runs after anything is sent or withdrawn.
+ * Save to; `onChange` runs after anything is sent or withdrawn. `page` aborts
+ * when the result is replaced: a send or check still running then stops, and
+ * touches nothing on the new page.
  */
-export async function mountReport(key: string, kind: ReportKind, dest: () => Destination, onChange: () => void) {
+export async function mountReport(key: string, kind: ReportKind, dest: () => Destination, onChange: () => void, page: AbortSignal) {
   let item = await localSaves().get(key).catch(() => undefined);
+  if (page.aborted) return;
   let why: string | undefined;
   let check: AbortController | null = null;
   const form = $<HTMLFormElement>('reportForm');
@@ -204,7 +207,9 @@ export async function mountReport(key: string, kind: ReportKind, dest: () => Des
 
   /** Show a send's outcome; on `verification_required`, run the check in the form and send once more. */
   async function outcome(res: SubmitResponse, retried = false) {
+    if (page.aborted) return;
     item = (await localSaves().get(key).catch(() => undefined)) ?? item;
+    if (page.aborted) return;
     if (isError(res) && res.error === 'verification_required' && res.verifyUrl && res.server && !retried && existing()) {
       if (form.classList.contains('hidden')) openForm(existing());
       return runCheck(res.server, res.verifyUrl);
@@ -240,8 +245,8 @@ export async function mountReport(key: string, kind: ReportKind, dest: () => Des
       sent = res;
       return null;
     };
-    const passed = await mountCheck(box, { server, verifyUrl, key, renew, signal: ctl.signal });
-    if (ctl.signal.aborted) return;
+    const passed = await mountCheck(box, { server, verifyUrl, key, renew, signal: AbortSignal.any([ctl.signal, page]) });
+    if (ctl.signal.aborted || page.aborted) return;
     check = null;
     busy(false);
     renderReasons(checked());
@@ -265,6 +270,7 @@ export async function mountReport(key: string, kind: ReportKind, dest: () => Des
     $('rfError').textContent = '';
     busy(true, 'Sending…');
     const res = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key, report }).catch(failed);
+    if (page.aborted) return;
     busy(false);
     renderReasons(reasons);
     await outcome(res);
@@ -277,8 +283,10 @@ export async function mountReport(key: string, kind: ReportKind, dest: () => Des
 
   async function withdraw() {
     const res: WithdrawResult = await sendMessage<'FPR_WITHDRAW'>({ type: 'FPR_WITHDRAW', key }).catch(failed);
+    if (page.aborted) return;
     if (isError(res)) return setStatus('err', `Couldn't withdraw it: ${errorText(res)}`);
     item = (await localSaves().get(key).catch(() => undefined)) ?? item;
+    if (page.aborted) return;
     why = undefined;
     render();
     const base = dest().base;

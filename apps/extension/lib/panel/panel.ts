@@ -111,8 +111,12 @@ function showState(id: (typeof STATES)[number]) {
   }
 }
 
+/** Aborts when the result on show is replaced or hidden, stopping its sends and checks. */
+let resultLife = new AbortController();
+
 async function scan(force = false) {
   const seq = ++scanSeq;
+  resultLife.abort();
   showState('state-loading');
   $('rescan').classList.add('spinning');
   const res = await sendMessage<'FPR_SCAN'>({ type: 'FPR_SCAN', force }).catch((e): ErrorResponse => panelError(e));
@@ -144,8 +148,9 @@ function bindResult() {
     const base = settings ? serverBase(settings) : null;
     return { base, label: base && settings ? destinationLabel(settings) : null };
   };
-  mountReport(scanKey(current), current.kind, dest, invalidateLeaderboard);
-  if (current.kind === 'profile' && current.facts.memberId) mountRemoval($('removal'), current.facts.memberId, dest);
+  resultLife = new AbortController();
+  mountReport(scanKey(current), current.kind, dest, invalidateLeaderboard, resultLife.signal);
+  if (current.kind === 'profile' && current.facts.memberId) mountRemoval($('removal'), current.facts.memberId, dest, resultLife.signal);
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
     img.addEventListener('error', () => img.remove(), { once: true }),
   );

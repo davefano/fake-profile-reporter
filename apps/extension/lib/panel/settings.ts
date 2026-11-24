@@ -132,28 +132,42 @@ async function markOffered() {
   if (base && !s.offeredUpload.includes(base)) await updateSettings({ offeredUpload: [...s.offeredUpload, base] });
 }
 
+/** True while an upload, and any bot check it opened, is running: a second click does nothing. */
+let uploading = false;
+
 async function uploadNow() {
-  $<HTMLButtonElement>('uploadBtn').disabled = $<HTMLButtonElement>('offerYes').disabled = true;
-  setStatus('dataStatus', '', 'Uploading…');
-  const res = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch((e): ErrorResponse => panelError(e));
-  $<HTMLButtonElement>('uploadBtn').disabled = $<HTMLButtonElement>('offerYes').disabled = false;
-  if (isError(res)) setStatus('dataStatus', 'err', res.message ?? res.error);
-  else if (res.failed) setStatus('dataStatus', 'err', `Uploaded ${res.uploaded}, ${res.failed} failed: ${res.error}`);
-  else setStatus('dataStatus', 'ok', `Uploaded ${plural(res.uploaded, 'save')}.`);
-  const base = serverBase(await getSettings());
-  if (!isError(res) && res.verifyUrl && base) {
-    setStatus('dataStatus', '', `Uploaded ${plural(res.uploaded, 'save')}. ${plural(res.waiting, 'report')} ${res.waiting === 1 ? 'waits' : 'wait'} for a quick check, once for ${host(base)}.`);
-    // A fresh challenge comes from uploading again; null once nothing waits for one.
-    const renew = async () => {
-      const again = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch(() => null);
-      return again && !isError(again) ? again.verifyUrl : null;
-    };
-    if (await mountCheck($('uploadCheck'), { server: base, verifyUrl: res.verifyUrl, renew })) {
-      $('uploadCheck').classList.add('hidden');
-      return uploadNow();
+  if (uploading) return;
+  uploading = true;
+  const buttons = [$<HTMLButtonElement>('uploadBtn'), $<HTMLButtonElement>('offerYes')];
+  buttons.forEach((b) => (b.disabled = true));
+  let again = false;
+  try {
+    setStatus('dataStatus', '', 'Uploading…');
+    const res = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch((e): ErrorResponse => panelError(e));
+    if (isError(res)) setStatus('dataStatus', 'err', res.message ?? res.error);
+    else if (res.failed) setStatus('dataStatus', 'err', `Uploaded ${res.uploaded}, ${res.failed} failed: ${res.error}`);
+    else setStatus('dataStatus', 'ok', `Uploaded ${plural(res.uploaded, 'save')}.`);
+    const base = serverBase(await getSettings());
+    if (!isError(res) && res.verifyUrl && base) {
+      setStatus('dataStatus', '', `Uploaded ${plural(res.uploaded, 'save')}. ${plural(res.waiting, 'report')} ${res.waiting === 1 ? 'waits' : 'wait'} for a quick check, once for ${host(base)}.`);
+      // A fresh challenge comes from uploading again; null once nothing waits for one.
+      const renew = async () => {
+        const next = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch(() => null);
+        return next && !isError(next) ? next.verifyUrl : null;
+      };
+      if (await mountCheck($('uploadCheck'), { server: base, verifyUrl: res.verifyUrl, renew })) {
+        $('uploadCheck').classList.add('hidden');
+        again = true;
+        return;
+      }
     }
+    await refreshSettings();
+  } finally {
+    uploading = false;
+    buttons.forEach((b) => (b.disabled = false));
+    // Passed the check: send what waited for it.
+    if (again) void uploadNow();
   }
-  await refreshSettings();
 }
 
 async function chooseMode(mode: SaveMode) {
