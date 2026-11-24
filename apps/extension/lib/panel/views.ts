@@ -181,12 +181,16 @@ function readNotes(r: ScanResult) {
 
 function actions(r: ScanResult) {
   const save = `Save this ${NOUN[r.kind]} without saying anything about it`;
+  const know = { profile: ['Know this person?', "Vouch that they're real"], company: ['Know this company?', "Vouch that it's real"], job: ['Know this job?', "Vouch that it's real"] }[r.kind];
   return `<div class="actions">
     ${reportMarkup(r.kind)}
     <p class="status" id="submitStatus" role="status"></p>
-    <div class="btn-row">
-      <button class="btn secondary" id="trackBtn" title="${save}">Save</button>
-      <button class="btn danger" id="reportBtn">Report or vouch</button>
+    <div id="actionIdle">
+      <div class="btn-row">
+        <button class="btn secondary" id="trackBtn" title="${save}">Save</button>
+        <button class="btn danger" id="reportBtn">Report…</button>
+      </div>
+      <p class="alt">${know[0]} <button type="button" class="lnk" id="vouchBtn">${know[1]}</button></p>
     </div>
   </div>`;
 }

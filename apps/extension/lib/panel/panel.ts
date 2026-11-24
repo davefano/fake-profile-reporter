@@ -8,7 +8,7 @@ import { scanKey, sendMessage, targetKey, type ScanResult, type SubmitResponse }
 import { paintDither, watchDither } from './dither';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
 import { applyMirroredPalette, applyPalette } from './palettes';
-import { mountReport } from './report-form';
+import { errorText, mountReport, showUnsent } from './report-form';
 import { loadSaved } from './saved';
 import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
 import { renderResult } from './views';
@@ -138,8 +138,11 @@ async function scan(force = false) {
 function bindResult() {
   if (!current) return;
   $('trackBtn').addEventListener('click', saveOnly);
-  const where = () => (settings && serverBase(settings) ? destinationLabel(settings) : null);
-  mountReport(scanKey(current), current.kind, where, invalidateLeaderboard);
+  const dest = () => {
+    const base = settings ? serverBase(settings) : null;
+    return { base, label: base && settings ? destinationLabel(settings) : null };
+  };
+  mountReport(scanKey(current), current.kind, dest, invalidateLeaderboard);
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
     img.addEventListener('error', () => img.remove(), { once: true }),
   );
@@ -155,38 +158,46 @@ function bindResult() {
 /** Save without saying anything about it. */
 async function saveOnly() {
   if (!current) return;
+  const key = scanKey(current);
   const btn = $<HTMLButtonElement>('trackBtn');
   const status = $('submitStatus');
   btn.disabled = true;
   btn.textContent = 'Saving…';
   status.className = 'status';
   status.textContent = '';
-
-  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key: scanKey(current) }).catch((e): ErrorResponse => ({
+  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key }).catch((e): ErrorResponse => ({
     error: 'panel_error',
     message: String(e),
   }));
-  if (!isError(res)) {
-    btn.textContent = 'Saved ✓';
-    status.className = 'status ok';
-    if (!res.server) {
-      status.textContent = 'Saved in this browser.';
+  btn.disabled = !isError(res) || !!res.savedLocally;
+  btn.textContent = btn.disabled ? 'Saved ✓' : 'Save';
+  saved(res, key);
+}
+
+function saved(res: SubmitResponse, key: string) {
+  const status = $('submitStatus');
+  if (isError(res)) {
+    if (!res.savedLocally) {
+      status.className = 'status err';
+      status.textContent = errorText(res);
       return;
     }
-    // The server scores without viewer-relative signals, so its number can differ.
-    const where = settings ? destinationLabel(settings) : 'the server';
-    const theirs = res.server.score != null && res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
-    status.textContent = `Saved to ${where}.${theirs}`;
+    showUnsent(errorText(res), async () => {
+      status.className = 'status';
+      status.textContent = 'Sending…';
+      saved(await sendMessage<'FPR_SYNC'>({ type: 'FPR_SYNC', key }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) })), key);
+    });
     return;
   }
-  btn.disabled = !!res.savedLocally;
-  btn.textContent = res.savedLocally ? 'Saved ✓' : 'Save';
-  status.className = 'status err';
-  const MSG: Record<string, string> = {
-    daily_limit_reached: 'Daily limit reached. Try again tomorrow.',
-  };
-  const why = MSG[res.error] ?? res.message ?? res.error;
-  status.textContent = res.savedLocally ? `Saved in this browser, but not sent: ${why}` : why;
+  status.className = 'status ok';
+  if (!res.server) {
+    status.textContent = 'Saved in this browser.';
+    return;
+  }
+  // The server scores without viewer-relative signals, so its number can differ.
+  const where = settings ? destinationLabel(settings) : 'the server';
+  const theirs = res.server.score != null && current && res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
+  status.textContent = `Saved to ${where}.${theirs}`;
 }
 
 // --- mount -----------------------------------------------------------------------

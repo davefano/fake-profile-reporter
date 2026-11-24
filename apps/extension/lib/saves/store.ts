@@ -15,9 +15,8 @@ export interface LocalReport {
   confidence: ReportConfidence | null;
   /** Private: sent to the server, which stores it and never shows it. */
   note: string | null;
+  /** When this version was written; it names the version (see SavedItem.heldBy). */
   at: number;
-  /** Servers holding this version of the report. */
-  sentTo: string[];
 }
 
 export interface SavedItem {
@@ -34,6 +33,15 @@ export interface SavedItem {
   level: RiskLevel;
   savedAt: number;
   report: LocalReport | null;
+  /** When the report was withdrawn. With `report` null, the item is a tombstone servers in `heldBy` still need. */
+  withdrawnAt: number | null;
+  /**
+   * Every server that may hold any version of the report, with the version
+   * (`LocalReport.at`) it is known to hold, or null when that isn't confirmed.
+   * A server joins before the request is sent and leaves only after a DELETE
+   * succeeds.
+   */
+  heldBy: Record<string, number | null>;
   /** Servers this version of the item has been sent to. */
   uploadedTo: string[];
   payload: SavedPayload;
@@ -68,20 +76,17 @@ export function saveStore(area: Area) {
         .filter((x): x is SavedItem => !!x)
         .sort((a, b) => b.savedAt - a.savedAt);
     },
+    /** Rewrite one item; `fn` returning the same object writes nothing. Run under upload.ts's serial() to avoid lost updates. */
+    async update(key: string, fn: (item: SavedItem) => SavedItem): Promise<SavedItem | undefined> {
+      const item = await get(key);
+      if (!item) return undefined;
+      const next = fn(item);
+      if (next !== item) await put(next);
+      return next;
+    },
     async markUploaded(key: string, server: string) {
       const item = await get(key);
       if (item && !item.uploadedTo.includes(server)) await put({ ...item, uploadedTo: [...item.uploadedTo, server] });
-    },
-    /** The server now holds this item's report, as it was when sent. */
-    async markReportSent(key: string, server: string, at: number) {
-      const item = await get(key);
-      if (item?.report && item.report.at === at && !item.report.sentTo.includes(server)) {
-        await put({ ...item, report: { ...item.report, sentTo: [...item.report.sentTo, server] } });
-      }
-    },
-    async setReport(key: string, report: LocalReport | null) {
-      const item = await get(key);
-      if (item) await put({ ...item, report });
     },
     async setTargetId(key: string, targetId: string) {
       const item = await get(key);
@@ -106,38 +111,54 @@ export function saveStore(area: Area) {
 
 export const localSaves = () => saveStore(browser.storage.local);
 
-/** The newer save wins; the newer report wins, and a report on either side is kept. Returns `have` when nothing changes. */
+/** The version of what you said: the report's time, or the withdrawal's; null if you never said anything. */
+export const intentAt = (i: Pick<SavedItem, 'report' | 'withdrawnAt'>) => i.report?.at ?? i.withdrawnAt ?? null;
+
+/** True when `server` doesn't match what you last said: it lacks this report, or still holds a withdrawn one. */
+export function needsSync(i: SavedItem, server: string) {
+  if (i.report) return i.heldBy[server] !== i.report.at;
+  return server in i.heldBy;
+}
+
+/**
+ * The newer save wins; the newer of the two reports or withdrawals wins, so a
+ * newer withdrawal beats an older report. `heldBy` is the union (either
+ * browser may have sent it), confirmed only where it matches the winner.
+ */
 export function mergeItem(have: SavedItem | undefined, incoming: SavedItem): SavedItem {
   if (!have) return incoming;
   const [newer, older] = incoming.savedAt > have.savedAt ? [incoming, have] : [have, incoming];
-  const reports = [newer.report, older.report].filter((r): r is LocalReport => !!r).sort((a, b) => b.at - a.at);
-  const same = reports.length === 2 && reports[0]!.at === reports[1]!.at;
-  const report = reports[0] ? { ...reports[0], sentTo: same ? [...new Set([...reports[0].sentTo, ...reports[1]!.sentTo])] : reports[0].sentTo } : null;
+  const said = (intentAt(incoming) ?? -1) > (intentAt(have) ?? -1) ? incoming : have;
+  const at = intentAt(said);
+  const heldBy: Record<string, number | null> = {};
+  for (const s of new Set([...Object.keys(have.heldBy), ...Object.keys(incoming.heldBy)])) {
+    heldBy[s] = at !== null && (have.heldBy[s] === at || incoming.heldBy[s] === at) ? at : null;
+  }
   const uploadedTo = newer.savedAt === older.savedAt ? [...new Set([...newer.uploadedTo, ...older.uploadedTo])] : newer.uploadedTo;
-  const next = { ...newer, targetId: newer.targetId ?? older.targetId, report, uploadedTo };
+  const next: SavedItem = { ...newer, targetId: newer.targetId ?? older.targetId, report: said.report, withdrawnAt: said.report ? null : said.withdrawnAt, heldBy, uploadedTo };
   return JSON.stringify(next) === JSON.stringify(have) ? have : next;
 }
 
 /** Saves not yet sent to `server`. */
 export const pendingFor = (items: SavedItem[], server: string) => items.filter((i) => !i.uploadedTo.includes(server));
 
-/** Reports not yet sent to `server`. */
-export const reportsPendingFor = (items: SavedItem[], server: string) => items.filter((i) => i.report && !i.report.sentTo.includes(server));
+/** Reports `server` doesn't have yet, and withdrawals it hasn't had. */
+export const reportsPendingFor = (items: SavedItem[], server: string) => items.filter((i) => needsSync(i, server));
 
 /**
- * Saves from before reports had reasons stored `reportedAt` and no target ID.
- * They become a report with reason "Other", not yet sent anywhere.
+ * Released builds stored `reportedAt`, no target ID and no `heldBy`. A
+ * `reportedAt` becomes a report with reason "Other", held nowhere yet.
  */
 function normalize(x: unknown): SavedItem | undefined {
   if (!x || typeof x !== 'object') return undefined;
   const i = x as Partial<SavedItem> & { reportedAt?: number | null };
-  if ('report' in i && 'targetId' in i) return i as SavedItem;
+  if ('report' in i && 'targetId' in i && 'heldBy' in i && 'withdrawnAt' in i) return i as SavedItem;
   const { reportedAt, ...rest } = i;
   const payload = i.payload as { kind?: string; id?: unknown } | undefined;
   const targetId = payload && payload.kind !== 'profile' && typeof payload.id === 'string' ? payload.id : null;
   const report: LocalReport | null =
-    i.report ?? (typeof reportedAt === 'number' ? { stance: 'report', reasons: ['other'], confidence: 'suspected', note: null, at: reportedAt, sentTo: [] } : null);
-  return { ...rest, targetId: i.targetId ?? targetId, report } as SavedItem;
+    i.report ?? (typeof reportedAt === 'number' ? { stance: 'report', reasons: ['other'], confidence: 'suspected', note: null, at: reportedAt } : null);
+  return { ...rest, targetId: i.targetId ?? targetId, report, withdrawnAt: i.withdrawnAt ?? null, heldBy: i.heldBy ?? {} } as SavedItem;
 }
 
 // --- Export / Import -----------------------------------------------------------
@@ -147,34 +168,37 @@ const FORMAT = 'fake-profile-reporter/saves';
 const OLD_FORMATS = ['fake-linkedin-reporter/saves'];
 
 /**
- * One file with every save and this browser's reporter key, so reports can be
- * edited from another browser. The key works like a password.
+ * One file with every save, its withdrawals, and this browser's master key
+ * (lib/saves/reporter.ts), so reports can be edited from another browser.
+ * The key works like a password.
  */
-export function exportFile(items: SavedItem[], reporterKey: string | null, now = Date.now()) {
-  return JSON.stringify({ format: FORMAT, version: 2, exportedAt: now, reporterKey, items }, null, 1);
+export function exportFile(items: SavedItem[], masterKey: string | null, now = Date.now()) {
+  return JSON.stringify({ format: FORMAT, version: 2, exportedAt: now, masterKey, items }, null, 1);
 }
 
-const REPORTER_KEY = /^[A-Za-z0-9_-]{32,128}$/;
+const MASTER_KEY = /^[A-Za-z0-9_-]{32,128}$/;
 
 /** Read an export. Throws with a message for the user when it isn't one; skips items that don't look right. */
-export function parseExport(text: string): { items: SavedItem[]; skipped: number; reporterKey: string | null } {
+export function parseExport(text: string): { items: SavedItem[]; skipped: number; masterKey: string | null } {
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
     throw new Error("That file isn't JSON.");
   }
-  const file = data as { format?: unknown; version?: unknown; items?: unknown; reporterKey?: unknown };
+  const file = data as { format?: unknown; version?: unknown; items?: unknown; masterKey?: unknown };
   if (!file || (file.format !== FORMAT && !OLD_FORMATS.includes(file.format as string)) || !Array.isArray(file.items)) throw new Error("That file isn't a Fake Profile Reporter export.");
   if (file.version !== 1 && file.version !== 2) throw new Error('That export is from a newer version of the extension.');
   const items = file.items.map(normalize).filter(isSavedItem);
-  const reporterKey = typeof file.reporterKey === 'string' && REPORTER_KEY.test(file.reporterKey) ? file.reporterKey : null;
-  return { items, skipped: file.items.length - items.length, reporterKey };
+  const masterKey = typeof file.masterKey === 'string' && MASTER_KEY.test(file.masterKey) ? file.masterKey : null;
+  return { items, skipped: file.items.length - items.length, masterKey };
 }
 
 const KINDS = ['profile', 'company', 'job'];
 const LEVELS = ['low', 'medium', 'high'];
 const LINKEDIN_URL = /^https:\/\/([a-z]{2,3}\.|www\.)?linkedin\.com\//;
+/** heldBy keys are server origins, as settings.ts normalizeServer gives them. */
+const ORIGIN = /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i;
 const num = (x: unknown) => typeof x === 'number' && Number.isFinite(x);
 const strOrNull = (x: unknown) => x === null || typeof x === 'string';
 
@@ -197,6 +221,11 @@ function isSavedItem(x: unknown): x is SavedItem {
     num(i.savedAt) &&
     strOrNull(i.targetId) &&
     (i.report === null || isReport(i.kind as SavedItem['kind'], i.report)) &&
+    (i.withdrawnAt === null || num(i.withdrawnAt)) &&
+    !!i.heldBy &&
+    typeof i.heldBy === 'object' &&
+    !Array.isArray(i.heldBy) &&
+    Object.entries(i.heldBy).every(([k, v]) => ORIGIN.test(k) && (v === null || num(v))) &&
     Array.isArray(i.uploadedTo) &&
     i.uploadedTo.every((s) => typeof s === 'string') &&
     !!p &&
@@ -216,8 +245,6 @@ function isReport(kind: SavedItem['kind'], x: unknown): x is LocalReport {
     r.reasons.every((x) => typeof x === 'string' && allowed.has(x)) &&
     (r.confidence === null || r.confidence === 'suspected' || r.confidence === 'confirmed') &&
     (r.note === null || (typeof r.note === 'string' && r.note.length <= NOTE_MAX)) &&
-    num(r.at) &&
-    Array.isArray(r.sentTo) &&
-    r.sentTo.every((s) => typeof s === 'string')
+    num(r.at)
   );
 }

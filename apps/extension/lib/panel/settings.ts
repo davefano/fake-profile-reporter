@@ -3,10 +3,11 @@
 import { COMMUNITY_URL } from '@/lib/config';
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { getSettings, normalizeServer, serverBase, updateSettings, type SaveMode, type Settings } from '@/lib/saves/settings';
-import { setReporterKey, storedReporterKey } from '@/lib/saves/reporter';
+import { setMasterKey, storedMasterKey } from '@/lib/saves/reporter';
 import { exportFile, localSaves, parseExport, pendingFor, reportsPendingFor } from '@/lib/saves/store';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
+import { mountCheck } from './verify';
 import { applyPalette, isPaletteChoice, PALETTES, SYSTEM_PALETTE, type PaletteTokens } from './palettes';
 
 const PAPER = PALETTES.find((p) => p.id === SYSTEM_PALETTE.light)!.tokens;
@@ -80,6 +81,7 @@ export const SETTINGS_MARKUP = `
   <input id="importFile" type="file" accept="application/json,.json" hidden />
   <button id="uploadBtn" class="btn secondary wide hidden"></button>
   <p id="dataStatus" class="status" role="status"></p>
+  <div id="uploadCheck" class="check hidden"></div>
 </section>
 </div>
 `;
@@ -140,6 +142,19 @@ async function uploadNow() {
   if (isError(res)) setStatus('dataStatus', 'err', res.message ?? res.error);
   else if (res.failed) setStatus('dataStatus', 'err', `Uploaded ${res.uploaded}, ${res.failed} failed: ${res.error}`);
   else setStatus('dataStatus', 'ok', `Uploaded ${plural(res.uploaded, 'save')}.`);
+  const base = serverBase(await getSettings());
+  if (!isError(res) && res.verifyUrl && base) {
+    setStatus('dataStatus', '', `Uploaded ${plural(res.uploaded, 'save')}. ${plural(res.waiting, 'report')} ${res.waiting === 1 ? 'waits' : 'wait'} for a quick check, once for ${host(base)}.`);
+    // A fresh challenge comes from uploading again; null once nothing waits for one.
+    const renew = async () => {
+      const again = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch(() => null);
+      return again && !isError(again) ? again.verifyUrl : null;
+    };
+    if (await mountCheck($('uploadCheck'), { server: base, verifyUrl: res.verifyUrl, renew })) {
+      $('uploadCheck').classList.add('hidden');
+      return uploadNow();
+    }
+  }
   await refreshSettings();
 }
 
@@ -184,7 +199,7 @@ async function connect(e: Event) {
 
 async function exportSaves() {
   const items = await localSaves().list();
-  const url = URL.createObjectURL(new Blob([exportFile(items, await storedReporterKey())], { type: 'application/json' }));
+  const url = URL.createObjectURL(new Blob([exportFile(items, await storedMasterKey())], { type: 'application/json' }));
   const a = Object.assign(document.createElement('a'), { href: url, download: `fake-profile-reporter-saves-${new Date().toISOString().slice(0, 10)}.json` });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
@@ -196,15 +211,15 @@ async function importSaves() {
   $<HTMLInputElement>('importFile').value = '';
   if (!file) return;
   try {
-    const { items, skipped, reporterKey } = parseExport(await file.text());
-    // Take the file's reporter key only if this browser has none, or hasn't sent
+    const { items, skipped, masterKey } = parseExport(await file.text());
+    // Take the file's master key only if this browser has none, or hasn't sent
     // a report with its own: otherwise its own reports could no longer be edited.
-    const own = await storedReporterKey();
+    const own = await storedMasterKey();
     let keyNote = '';
-    if (reporterKey && reporterKey !== own) {
-      const sentAny = (await localSaves().list()).some((i) => i.report?.sentTo.length);
+    if (masterKey && masterKey !== own) {
+      const sentAny = (await localSaves().list()).some((i) => Object.keys(i.heldBy).length);
       if (!own || !sentAny) {
-        await setReporterKey(reporterKey);
+        await setMasterKey(masterKey);
         keyNote = ' Using the reporter key from the file.';
       } else {
         keyNote = " Kept this browser's reporter key, so reports sent from the other browser can't be edited here.";

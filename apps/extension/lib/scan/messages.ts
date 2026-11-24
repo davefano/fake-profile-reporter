@@ -4,7 +4,8 @@
 import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget, ProfilePart } from '@fpr/core/linkedin';
 import type { Score } from '@fpr/core/scam';
 import type { ReportCounts } from '@fpr/core/scam';
-import type { LeaderboardResponse, ReportRequest } from '@fpr/core/wire';
+import type { LeaderboardResponse, ReportRequest, VerifyResponse } from '@fpr/core/wire';
+import type { ApiError } from '@/lib/api';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
 import { send, type ErrorResponse } from '@/lib/runtime';
 import type { UploadResult } from '@/lib/saves/upload';
@@ -57,15 +58,23 @@ export type ScanResponse = ScanResult | ErrorResponse;
  * Saved in this browser, and on the server when one is set. `server.score` is
  * the server's own score (it can differ from the panel's: see scoreProfile's
  * mutual connections; null when it already had this save), and `counts` its
- * report counts after this report. An error after the local save says so in
- * `savedLocally`.
+ * report counts after this report. `unsent`: servers that still don't match
+ * what you said (each is updated the next time it's sent to). An error after
+ * the local save says so in `savedLocally`, and names the `server` it came
+ * from; `verification_required` carries the bot check's `verifyUrl`.
  */
 export type SubmitResponse =
-  | { ok: true; server: { score: number | null; counts: ReportCounts | null } | null }
-  | (ErrorResponse & { savedLocally?: boolean });
+  | { ok: true; server: { score: number | null; counts: ReportCounts | null } | null; unsent: string[] }
+  | (ApiError & { savedLocally?: boolean; server?: string | null; unsent?: string[] });
 
-/** Withdrawn here, and on the current server if it had it. `elsewhere`: servers that still do. */
-export type WithdrawResult = { ok: true; counts: ReportCounts | null; elsewhere: string[] } | ErrorResponse;
+/** Withdrawn here, and wherever it was sent. `unsent`: servers that didn't get the withdrawal yet. */
+export type WithdrawResult = { ok: true; counts: ReportCounts | null; unsent: string[] } | ErrorResponse;
+
+/** The bot check done in a tab: whether it passed, and the send that followed when a key was given. */
+export interface VerifyWaitResult {
+  verified: boolean;
+  sync: SubmitResponse | null;
+}
 
 export interface AppMessages {
   /** Scan the active tab's profile, company, or job. */
@@ -74,6 +83,12 @@ export interface AppMessages {
   FPR_SUBMIT: { req: { type: 'FPR_SUBMIT'; key: string; report?: ReportRequest }; res: SubmitResponse };
   /** Take back this browser's report on it. */
   FPR_WITHDRAW: { req: { type: 'FPR_WITHDRAW'; key: string }; res: WithdrawResult };
+  /** Send what you said about it wherever it hasn't gone yet: "Send now", and the retry after the bot check. */
+  FPR_SYNC: { req: { type: 'FPR_SYNC'; key: string }; res: SubmitResponse };
+  /** The bot check's token (from the framed /verify page) for `server`, which must be the current one. */
+  FPR_VERIFY: { req: { type: 'FPR_VERIFY'; server: string; token: string; challenge: string }; res: VerifyResponse | ErrorResponse };
+  /** The bot check runs in a tab: wait until `server` says it passed, then send `key` if given. */
+  FPR_VERIFY_WAIT: { req: { type: 'FPR_VERIFY_WAIT'; server: string; key?: string }; res: VerifyWaitResult | ErrorResponse };
   /** Reported profiles on the server saves go to. */
   FPR_LEADERBOARD: { req: { type: 'FPR_LEADERBOARD' }; res: LeaderboardResponse | ErrorResponse };
   /** Send saves the server doesn't have yet. */

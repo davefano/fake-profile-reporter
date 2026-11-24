@@ -311,16 +311,65 @@ main { padding: 20px var(--gutter) 0; overflow-x: hidden; }
 .b-lvl .tag { width: 64px; height: 24px; border-width: 1px; font-size: 12px; }
 
 /* --- report form ----------------------------------------------------------- */
-.report-form { margin-bottom: 12px; padding: 12px; border-radius: var(--radius); background: var(--raised); }
-.report-form fieldset { border: 0; margin: 0 0 12px; padding: 0; }
-.report-form legend { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 6px; padding: 0; }
-.rf-choice { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 3px 0; cursor: pointer; }
-.rf-choice input { margin: 3px 0 0; flex: none; }
-.rf-note { width: 100%; resize: vertical; min-height: 64px; display: block; }
-.rf-help { font-size: 12px; color: var(--text3); margin: 4px 0 10px; }
-.report-summary { font-size: 13px; color: var(--text2); margin: 0 0 8px; }
-.link-btn { border: 0; background: none; padding: 0; margin-left: 8px; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; }
-.link-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* While the form is open the actions stop sticking, so the whole form scrolls. */
+.actions.open { position: static; }
+.alt { margin: 8px 0 0; font-size: 13px; color: var(--text3); }
+.lnk.quiet { color: var(--text2); }
+.sheet { display: grid; gap: 14px; }
+.sheet h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.sheet fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.fl-l { display: block; font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 6px; padding: 0; }
+.fl-l span { font-weight: 400; color: var(--text3); }
+.seg { display: grid; gap: 6px; }
+.seg legend { margin-bottom: 6px; }
+.seg label {
+  display: grid; grid-template-columns: 18px 1fr; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--line2); border-radius: var(--radius);
+}
+.seg label:has(input:checked) { border-color: var(--accent); background: var(--raised); }
+.seg input, .sure input { margin: 3px 0 0; accent-color: var(--accent); }
+.seg small { display: block; color: var(--text3); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips label {
+  position: relative; display: inline-flex; align-items: center; padding: 5px 9px; cursor: pointer; font-size: 13px;
+  border: 1px solid var(--line2); border-radius: var(--radius);
+}
+.chips label:has(input:checked) { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.chips input { position: absolute; opacity: 0; pointer-events: none; }
+.chips label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sure { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.sure label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+textarea.note {
+  display: block; width: 100%; min-height: 64px; resize: vertical; font: 13px var(--sans); color: var(--text);
+  background: var(--deep); border: 1px solid var(--line2); border-radius: var(--radius); padding: 8px 10px;
+}
+textarea.note:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+.note-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text3); margin-top: 4px; }
+.sheet .err { margin: 0; font-size: 13px; color: var(--flag); }
+.sheet .err:empty { display: none; }
+.sheet .row { display: flex; gap: 8px; }
+.btn.grow { flex: 1; }
+.sheet :disabled { cursor: default; }
+.seg label:has(input:disabled), .chips label:has(input:disabled) { opacity: .6; }
+
+/* The bot check: a fixed-height box holds the frame's place while it loads. */
+.check { display: grid; gap: 6px; }
+.check-frame { position: relative; min-height: 72px; border: 1px dotted var(--line2); border-radius: var(--radius); }
+.check-frame iframe { display: block; width: 100%; height: 72px; border: 0; }
+.check-frame[data-state="loading"] iframe { position: absolute; inset: 0; opacity: 0; }
+.check-frame:has(iframe) .check-msg { margin-top: 0; }
+.check-msg { margin: 0; padding: 8px 10px; font-size: 13px; color: var(--text2); }
+.check-frame[data-state="loading"] .check-msg { position: absolute; inset: 0; display: grid; place-items: center; }
+.check-msg.err { color: var(--flag); }
+.check-row { font-size: 13px; }
+
+/* After sending: one line of what you said, and Edit, Withdraw, Send now. */
+.done { display: grid; gap: 4px; margin-bottom: 8px; }
+.done .what { margin: 0; font-size: 13px; }
+.done .what b { font-weight: 600; }
+.done .sub { margin: 0; font-size: 12px; color: var(--text3); }
+.done.offline .sub { color: var(--warn); }
+.done .row { display: flex; gap: 14px; align-items: center; margin-top: 6px; font-size: 13px; }
 
 /* --- settings -------------------------------------------------------------- */
 .icon-btn[aria-pressed="true"] { background: var(--raised); color: var(--text); }
