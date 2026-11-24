@@ -158,7 +158,8 @@ saves a day. Reports are capped at 50 a day per reporter and 200 per IP; bot
 checks at 20 a day per IP; removal requests at 3 a day per reporter and 5 per
 IP, with at most 100 pending overall. The report, bot-check and removal caps
 are counted atomically in D1, so parallel requests can't overrun them;
-withdrawals don't count. IPs and reporter keys are never stored raw, only
+withdrawals don't count. Attempts the bot check turns away don't count either;
+they have their own cap of 100 a day per IP. IPs and reporter keys are never stored raw, only
 salted SHA-256 hashes.
 
 **Privacy.** Report notes are stored and never returned by any route. The bot
