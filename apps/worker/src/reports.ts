@@ -26,6 +26,7 @@ const MAX_BODY = 8 * 1024;
 // Reports and edits per UTC day. Withdrawals don't count.
 const REPORTS_PER_REPORTER = 50;
 const REPORTS_PER_IP = 200;
+const UNVERIFIED_PER_IP = 100; // bot-check challenges handed out instead
 
 export const reports = new Hono<{ Bindings: Env }>();
 
@@ -71,6 +72,14 @@ reports.put('/api/reports/:kind/:id', async (c) => {
 
   const now = Date.now();
   const ipHash = await hashIp(clientIp(c.req.raw), c.env.IP_SALT);
+  // The bot check comes first, so an unverified attempt (a check left open and
+  // renewed every few minutes) doesn't use up the daily allowance. Unverified
+  // attempts each create a challenge, so they have their own cap.
+  const gate = await requireVerified(c, reporter, now);
+  if (gate) {
+    const ok = await countDaily(c.env.DB, [{ scope: 'reports.unverified.ip', subject: ipHash, max: UNVERIFIED_PER_IP }], now);
+    return ok ? gate : c.json({ error: 'daily_limit_reached' }, 429);
+  }
   const within = await countDaily(
     c.env.DB,
     [
@@ -80,19 +89,20 @@ reports.put('/api/reports/:kind/:id', async (c) => {
     now,
   );
   if (!within) return c.json({ error: 'daily_limit_reached' }, 429);
-  const gate = await requireVerified(c, reporter, now);
-  if (gate) return gate;
 
   const score = await targetScore(c.env, kind, id);
   if (!score) return c.json({ error: 'not_saved' }, 404);
 
   const db = c.env.DB;
   // Editing keeps the original created_at; reporting again after a withdrawal starts over.
-  const [, rowRes, countRes] = await db.batch([
+  // A removal approved after the check above must still win: the write holds only
+  // while the member isn't removed, in the same statement.
+  const [written, rowRes, countRes] = await db.batch([
     db
       .prepare(
         `INSERT INTO reports (kind, target_id, reporter, stance, reasons_json, confidence, note, score_json, ip_hash, created_at, updated_at, withdrawn_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, NULL)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10, NULL
+         WHERE ?1 <> 'profile' OR NOT EXISTS (SELECT 1 FROM removed_members WHERE member_id = CAST(?2 AS INTEGER))
          ON CONFLICT (kind, target_id, reporter) DO UPDATE SET
            stance = excluded.stance, reasons_json = excluded.reasons_json, confidence = excluded.confidence,
            note = excluded.note, score_json = excluded.score_json, ip_hash = excluded.ip_hash,
@@ -103,6 +113,7 @@ reports.put('/api/reports/:kind/:id', async (c) => {
     db.prepare('SELECT created_at, updated_at FROM reports WHERE kind = ? AND target_id = ? AND reporter = ?').bind(kind, id, reporter),
     reportCounts(db, kind, id),
   ]);
+  if (!written?.meta.changes) return c.json({ error: 'removed' satisfies GoneError }, 410);
   const row = rowRes?.results[0] as { created_at: number; updated_at: number } | undefined;
   const res: ReportResponse = {
     ok: true,

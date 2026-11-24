@@ -353,6 +353,40 @@ describe('approve', () => {
     expect((await list()).members).toEqual([]);
   });
 
+  test('a deny that lands between the approve read and its batch: approve answers 409 and deletes nothing', async () => {
+    const id = await filed();
+    const realBatch = env.DB.batch.bind(env.DB);
+    let raced = false;
+    env.DB.batch = (async (stmts: D1PreparedStatement[]) => {
+      if (!raced) {
+        raced = true;
+        await env.DB.prepare("UPDATE removal_requests SET status = 'denied_merits', decided_at = ? WHERE id = ?").bind(Date.now(), id).run();
+      }
+      return realBatch(stmts);
+    }) as typeof env.DB.batch;
+    expect((await approve(id)).status).toBe(409);
+    expect(await rows('SELECT member_id FROM accounts')).toHaveLength(1);
+    expect(await rows('SELECT * FROM removed_members')).toEqual([]);
+    expect(await requestRow(id)).toMatchObject({ status: 'denied_merits' });
+  });
+
+  test('a report that passed its checks before approval and commits after it: 410, and no report row', async () => {
+    const id = await filed();
+    const realBatch = env.DB.batch.bind(env.DB);
+    let approving = false;
+    env.DB.batch = (async (stmts: D1PreparedStatement[]) => {
+      if (!approving && stmts.length === 3) {
+        approving = true;
+        expect((await approve(id)).status).toBe(200); // the report's write batch is next
+      }
+      return realBatch(stmts);
+    }) as typeof env.DB.batch;
+    const r = await report(KEY_B);
+    expect(r.status).toBe(410);
+    expect(await r.json()).toEqual({ error: 'removed' });
+    expect(await rows('SELECT * FROM reports')).toEqual([]);
+  });
+
   test('a decided request cannot be approved', async () => {
     const id = await filed();
     await deny(id, 'merits');
@@ -432,5 +466,17 @@ describe('scheduled retention', () => {
     expect((await rows<{ id: string }>('SELECT id FROM verify_challenges')).map((r) => r.id)).toEqual(['b'.repeat(32)]);
     expect((await rows<{ reporter: string }>('SELECT reporter FROM verified_reporters')).map((r) => r.reporter)).toEqual(['new']);
     expect(await rows('SELECT day FROM daily_counts')).toEqual([{ day: new Date(now).toISOString().slice(0, 10) }]);
+  });
+});
+
+describe('reports and the bot check', () => {
+  test('unverified report attempts, such as a check left open and renewed, use none of the daily report cap', async () => {
+    env = { ...env, VERIFY_HOST: 'api.example.test', TURNSTILE_SITEKEY: 'site', TURNSTILE_SECRET: 'secret' };
+    for (let i = 0; i < 5; i++) expect((await report(KEY_B)).status).toBe(403);
+    expect(await rows("SELECT * FROM daily_counts WHERE scope IN ('reports.reporter', 'reports.ip')")).toEqual([]);
+    const reporter = await hashReporter(KEY_B, 'test');
+    await env.DB.prepare('INSERT INTO verified_reporters (reporter, verified_at, expires_at) VALUES (?, ?, ?)').bind(reporter, Date.now(), Date.now() + DAY).run();
+    expect((await report(KEY_B)).status).toBe(200);
+    expect(await rows("SELECT scope, count FROM daily_counts WHERE scope = 'reports.reporter'")).toEqual([{ scope: 'reports.reporter', count: 1 }]);
   });
 });

@@ -235,20 +235,25 @@ removals.post('/api/admin/removals/:id/approve', async (c) => {
     const now = Date.now();
     // Until migrations/later/0002 drops it, the old report table references accounts.
     const oldReports = await db.prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'account_reports'").first();
-    await db.batch([
-      db
-        .prepare("INSERT INTO removal_log (request_id, member_id, action, created_at) SELECT ?1, ?2, 'approve', ?3 WHERE EXISTS (SELECT 1 FROM removal_requests WHERE id = ?1 AND status = 'pending')")
-        .bind(req.id, memberId, now),
-      db.prepare('DELETE FROM account_snapshots WHERE member_id = ?').bind(memberId),
-      db.prepare('DELETE FROM account_current WHERE member_id = ?').bind(memberId),
-      db.prepare('DELETE FROM account_slugs WHERE member_id = ?').bind(memberId),
-      db.prepare("DELETE FROM reports WHERE kind = 'profile' AND target_id = ?").bind(String(memberId)),
-      ...(oldReports ? [db.prepare('DELETE FROM account_reports WHERE member_id = ?').bind(memberId)] : []),
-      db.prepare('DELETE FROM accounts WHERE member_id = ?').bind(memberId),
-      db.prepare('INSERT INTO removed_members (member_id, request_id, removed_at) VALUES (?, ?, ?) ON CONFLICT (member_id) DO NOTHING').bind(memberId, req.id, now),
+    // Every statement holds only while this request is still pending, so a
+    // deny that lands between the read above and this batch deletes nothing.
+    // ?1 is the member ID, ?2 the request ID, ?3 now.
+    const pending = "EXISTS (SELECT 1 FROM removal_requests WHERE id = ?2 AND status = 'pending')";
+    const params = [memberId, req.id, now];
+    const run = (sql: string) => db.prepare(sql).bind(...params.slice(0, sql.includes('?3') ? 3 : 2));
+    const [logged] = await db.batch([
+      run(`INSERT INTO removal_log (request_id, member_id, action, created_at) SELECT ?2, ?1, 'approve', ?3 WHERE ${pending}`),
+      run(`DELETE FROM account_snapshots WHERE member_id = ?1 AND ${pending}`),
+      run(`DELETE FROM account_current WHERE member_id = ?1 AND ${pending}`),
+      run(`DELETE FROM account_slugs WHERE member_id = ?1 AND ${pending}`),
+      run(`DELETE FROM reports WHERE kind = 'profile' AND target_id = CAST(?1 AS TEXT) AND ${pending}`),
+      ...(oldReports ? [run(`DELETE FROM account_reports WHERE member_id = ?1 AND ${pending}`)] : []),
+      run(`DELETE FROM accounts WHERE member_id = ?1 AND ${pending}`),
+      run(`INSERT INTO removed_members (member_id, request_id, removed_at) SELECT ?1, ?2, ?3 WHERE ${pending} ON CONFLICT (member_id) DO NOTHING`),
       // Every pending request for the member is settled by this approval.
-      db.prepare("UPDATE removal_requests SET status = 'approved_r2_pending', contact = NULL, decided_at = ? WHERE member_id = ? AND status = 'pending'").bind(now, memberId),
+      run(`UPDATE removal_requests SET status = 'approved_r2_pending', contact = NULL, decided_at = ?3 WHERE member_id = ?1 AND status = 'pending' AND ${pending}`),
     ]);
+    if (!logged?.meta.changes) return c.json({ error: 'already_decided' }, 409);
   }
 
   try {
