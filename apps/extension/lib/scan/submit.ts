@@ -68,8 +68,7 @@ export async function submit(key: string, report?: ReportRequest): Promise<Submi
       const others = await reconcile(key, null);
       return { ...saved, savedLocally: true, server: base, unsent: [...new Set([base, ...others.unsent])] };
     }
-    await saves.markUploaded(key, base);
-    if (!isError(saved) && saved.targetId) await saves.setTargetId(key, saved.targetId);
+    await saves.markUploaded(key, base, isError(saved) ? null : saved.targetId);
     return answer(base, await reconcile(key, base), isError(saved) ? null : saved.score);
   });
 }

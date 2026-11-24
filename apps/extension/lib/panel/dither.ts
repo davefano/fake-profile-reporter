@@ -60,9 +60,10 @@ function paintWash(c: HTMLCanvasElement, col: (token: string) => string) {
   g.fillStyle = col(WASH_TONE[c.dataset.level as RiskLevel] ?? 'warn');
   g.globalAlpha = WASH.opacity;
   const { density, reach } = WASH;
-  // Top-right corner only, clear of the sentence under the heading.
-  for (let y = 0; y < H; y++)
-    for (let x = 0; x < W; x++) {
+  // Top-right corner only, clear of the sentence under the heading. Outside it
+  // the density is 0 and nothing lights, so the loops skip the rest.
+  for (let y = 0; y < Math.min(H, Math.ceil(H * reach)); y++)
+    for (let x = Math.max(0, Math.floor(W * (1 - reach))); x < W; x++) {
       const d = density * Math.max(0, 1 - y / (H * reach)) * Math.max(0, (x / W - (1 - reach)) / reach);
       if (lit(x, y, d)) g.fillRect(x, y, 1, 1);
     }

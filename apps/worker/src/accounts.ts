@@ -13,6 +13,7 @@ import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, typ
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';
+import { toHex } from './ip';
 import { reporterLimits } from './limits';
 import { cleanSnapshot } from './snapshot';
 
@@ -26,7 +27,7 @@ const isGzip = (b: Uint8Array) => b[0] === 0x1f && b[1] === 0x8b;
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return toHex(new Uint8Array(digest).slice(0, 8));
 }
 
 accounts.post('/api/snapshots', async (c) => {

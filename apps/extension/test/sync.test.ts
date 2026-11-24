@@ -265,10 +265,10 @@ describe('reporter keys (KTD13)', () => {
 
 describe('the report form', () => {
   test('every stance needs at least one reason, impersonation included', () => {
-    expect(canSend('impersonated', [])).toBe(false);
-    expect(canSend('report', [])).toBe(false);
-    expect(canSend('vouch', [])).toBe(false);
-    expect(canSend('impersonated', ['contacted-me'])).toBe(true);
+    expect(canSend([])).toBe(false);
+    expect(canSend([])).toBe(false);
+    expect(canSend([])).toBe(false);
+    expect(canSend(['contacted-me'])).toBe(true);
   });
 
   test('a report that could not be sent says so and offers Send now, never a retry', () => {

@@ -1,5 +1,5 @@
 // "This is my profile": the person asks the server Save to points at to remove
-// their own profile (R17, KTD8). The panel issues a random code, they put it
+// their own profile. The panel issues a random code, they put it
 // in their headline or About, and "Check and send" reads the profile again
 // (read-only, their own session) and sends the request only when the code is
 // there. The check is a convenience: the maintainer reads the profile and
@@ -11,7 +11,7 @@ import type { ApiError } from '@/lib/api';
 import { isError } from '@/lib/runtime';
 import type { Area } from '@/lib/saves/store';
 import { sendMessage, type ScanResponse } from '@/lib/scan/messages';
-import { ago, esc } from './format';
+import { ago, esc, host, panelError } from './format';
 import { errorText, type Destination } from './report-form';
 import { mountCheck } from './verify';
 
@@ -87,7 +87,7 @@ export function answerOutcome(res: RemovalResponse | ApiError): RemovalOutcome {
  * request only if it's still `memberId` and its headline or About holds `code`.
  */
 export async function checkAndSend(o: { memberId: number; code: string; contact: string; scan: () => Promise<ScanResponse>; send: Send }): Promise<RemovalOutcome> {
-  const read: ScanResponse = await o.scan().catch((e): ApiError => ({ error: 'panel_error', message: String(e) }));
+  const read: ScanResponse = await o.scan().catch((e): ApiError => panelError(e));
   if (isError(read)) return { kind: 'scan_failed', message: read.message ?? read.error };
   if (read.kind !== 'profile' || read.facts.memberId !== o.memberId) return { kind: 'other_profile' };
   // A part that failed shows the earlier check's headline and About: not a fresh read.
@@ -96,7 +96,6 @@ export async function checkAndSend(o: { memberId: number; code: string; contact:
   return answerOutcome(await o.send(removalRequest(o.memberId, o.code, o.contact)));
 }
 
-const host = (s: string) => new URL(s).host;
 
 const REFUSED: Record<string, (server: string) => string> = {
   already_pending: () => 'You already have a request pending for this profile. The maintainer reviews it; nothing changes until then.',
@@ -130,7 +129,7 @@ export function outcomeText(o: RemovalOutcome, server: string): string {
 const LINK = `<p class="me-link"><button type="button" class="lnk quiet" id="meBtn">This is my profile</button> <span>Ask for its removal. Only for your own profile.</span></p>`;
 export const removalMarkup = () => `<section class="me" id="removal">${LINK}</section>`;
 
-const failed = (e: unknown): ApiError => ({ error: 'panel_error', message: String(e) });
+const failed = (e: unknown): ApiError => panelError(e);
 
 /** Wire the removal request for the profile `memberId` in `box`. `dest` reads Settings › Save to. */
 export async function mountRemoval(box: HTMLElement, memberId: number, dest: () => Destination) {

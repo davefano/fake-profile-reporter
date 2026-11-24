@@ -6,7 +6,7 @@ import { getSettings, normalizeServer, serverBase, updateSettings, type SaveMode
 import { setMasterKey, storedMasterKey } from '@/lib/saves/reporter';
 import { exportFile, localSaves, parseExport, pendingFor, reportsPendingFor } from '@/lib/saves/store';
 import { sendMessage } from '@/lib/scan/messages';
-import { esc } from './format';
+import { esc, host, panelError, plural } from './format';
 import { mountCheck } from './verify';
 import { applyPalette, isPaletteChoice, PALETTES, SYSTEM_PALETTE, type PaletteTokens } from './palettes';
 
@@ -87,8 +87,6 @@ export const SETTINGS_MARKUP = `
 `;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
-const host = (base: string) => new URL(base).host;
 
 function setStatus(id: string, kind: 'ok' | 'err' | '', text: string) {
   const el = $(id);
@@ -137,7 +135,7 @@ async function markOffered() {
 async function uploadNow() {
   $<HTMLButtonElement>('uploadBtn').disabled = $<HTMLButtonElement>('offerYes').disabled = true;
   setStatus('dataStatus', '', 'Uploading…');
-  const res = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
+  const res = await sendMessage<'FPR_UPLOAD'>({ type: 'FPR_UPLOAD' }).catch((e): ErrorResponse => panelError(e));
   $<HTMLButtonElement>('uploadBtn').disabled = $<HTMLButtonElement>('offerYes').disabled = false;
   if (isError(res)) setStatus('dataStatus', 'err', res.message ?? res.error);
   else if (res.failed) setStatus('dataStatus', 'err', `Uploaded ${res.uploaded}, ${res.failed} failed: ${res.error}`);

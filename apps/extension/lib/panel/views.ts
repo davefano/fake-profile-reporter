@@ -6,7 +6,7 @@
 import { removalMarkup } from './removal';
 import { reportMarkup } from './report-form';
 import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
-import { levelFor, type RiskLevel, type Score, type Signal } from '@fpr/core/scam';
+import { levelFor, RANK, signalStrength as strengthOf, type RiskLevel, type Score, type Signal } from '@fpr/core/scam';
 import type { CompanyScan, JobScan, ProfileScan, ScanResult } from '@/lib/scan/messages';
 import { ago, ageText, compact, esc, monthDay, monthYear } from './format';
 
@@ -26,17 +26,9 @@ const NOUN = { profile: 'profile', company: 'company page', job: 'job posting' }
 const TITLE: Record<RiskLevel, string> = { high: 'High suspicion', medium: 'Some concerns', low: 'Low suspicion' };
 const TAG: Record<RiskLevel, string> = { high: 'HI', medium: 'MED', low: 'LO' };
 export const LEVEL: Record<RiskLevel, string> = { high: 'High', medium: 'Medium', low: 'Low' };
-const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
 
 // --- signals ---------------------------------------------------------------------
-type Strength = 'major' | 'minor' | 'none';
-
-/** Stored scores before rules v6 have no strength: |weight| ≥ 12 reads as major. A zero weight earns nothing. */
-function strengthOf(x: Signal): Strength {
-  if (x.strength) return x.strength;
-  if (x.weight === 0) return 'none';
-  return Math.abs(x.weight) >= 12 ? 'major' : 'minor';
-}
+type Strength = ReturnType<typeof strengthOf>;
 
 const GAUGE: Record<Strength, number> = { major: 3, minor: 1, none: 0 };
 const byStrength = (a: Signal, b: Signal) => GAUGE[strengthOf(b)] - GAUGE[strengthOf(a)] || Math.abs(b.weight) - Math.abs(a.weight);

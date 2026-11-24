@@ -10,6 +10,7 @@ import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
 import { applyMirroredPalette, applyPalette } from './palettes';
 import { errorText, mountReport, showUnsent } from './report-form';
 import { mountRemoval } from './removal';
+import { panelError } from './format';
 import { loadSaved } from './saved';
 import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
 import { renderResult } from './views';
@@ -114,7 +115,7 @@ async function scan(force = false) {
   const seq = ++scanSeq;
   showState('state-loading');
   $('rescan').classList.add('spinning');
-  const res = await sendMessage<'FPR_SCAN'>({ type: 'FPR_SCAN', force }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
+  const res = await sendMessage<'FPR_SCAN'>({ type: 'FPR_SCAN', force }).catch((e): ErrorResponse => panelError(e));
   if (seq !== scanSeq) return; // a newer scan started
   $('rescan').classList.remove('spinning');
 
@@ -167,10 +168,7 @@ async function saveOnly() {
   btn.textContent = 'Saving…';
   status.className = 'status';
   status.textContent = '';
-  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key }).catch((e): ErrorResponse => ({
-    error: 'panel_error',
-    message: String(e),
-  }));
+  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key }).catch((e): ErrorResponse => panelError(e));
   btn.disabled = !isError(res) || !!res.savedLocally;
   btn.textContent = btn.disabled ? 'Saved ✓' : 'Save';
   saved(res, key);
@@ -187,7 +185,7 @@ function saved(res: SubmitResponse, key: string) {
     showUnsent(errorText(res), async () => {
       status.className = 'status';
       status.textContent = 'Sending…';
-      saved(await sendMessage<'FPR_SYNC'>({ type: 'FPR_SYNC', key }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) })), key);
+      saved(await sendMessage<'FPR_SYNC'>({ type: 'FPR_SYNC', key }).catch((e): ErrorResponse => panelError(e)), key);
     });
     return;
   }

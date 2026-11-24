@@ -3,13 +3,13 @@
 // re-scores the facts (it can't fetch LinkedIn pages), after checking their
 // shape. A report goes separately, once the thing it's about is saved there.
 //
-// Reports are reconciled per item (KTD11): every server in `heldBy` is brought
+// Reports are reconciled per item: every server in `heldBy` is brought
 // to what you last said, a PUT for a report or a DELETE for a withdrawal, one
 // server at a time under one serialized writer per item. What you said is
 // written here before any request goes out.
 
 import type { ReportCounts } from '@fpr/core/scam';
-import type { EntityResponse, ReportRequest, ReportResponse, SnapshotResponse, VerifyRequest, VerifyResponse, VerifyStatusResponse, WithdrawResponse } from '@fpr/core/wire';
+import { CHALLENGE_MS, type EntityResponse, type ReportRequest, type ReportResponse, type SnapshotResponse, type VerifyRequest, type VerifyResponse, type VerifyStatusResponse, type WithdrawResponse } from '@fpr/core/wire';
 import { api, type ApiError } from '@/lib/api';
 import { isError } from '@/lib/runtime';
 import { reporterKeyFor } from './reporter';
@@ -56,10 +56,7 @@ export async function saveOn(base: string, item: SavedItem): Promise<SavedItem |
   if (item.uploadedTo.includes(base)) return item;
   const res = await upload(base, item);
   if (isError(res) && !ALREADY.has(res.error)) return res;
-  const saves = localSaves();
-  await saves.markUploaded(item.key, base);
-  if (!isError(res) && res.targetId) await saves.setTargetId(item.key, res.targetId);
-  return (await saves.get(item.key)) ?? item;
+  return (await localSaves().markUploaded(item.key, base, isError(res) ? null : res.targetId)) ?? item;
 }
 
 /** What one server said: its counts after the change, or why it didn't take it. */
@@ -197,9 +194,6 @@ export async function verifyToken(base: string, token: string, challenge: string
   const body: VerifyRequest = { token, challenge };
   return api<VerifyResponse>(base, 'POST', '/api/verify', body, await reporterKeyFor(base));
 }
-
-/** Challenges last 10 minutes on the server. */
-const CHALLENGE_MS = 10 * 60_000;
 
 /**
  * Poll GET /api/verify/status until the check done in a tab has passed for

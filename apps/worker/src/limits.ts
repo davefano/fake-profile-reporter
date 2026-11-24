@@ -7,6 +7,11 @@
 
 import { clientIp, hashIp } from './ip';
 
+export const DAY_MS = 86_400_000;
+
+/** The UTC day, e.g. "2026-11-24": the key daily caps count under. */
+export const utcDay = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
+
 export interface Check {
   ok: boolean;
   commit(): Promise<void>;
@@ -19,7 +24,7 @@ export async function reporterLimits(c: { env: { RATE_KV: KVNamespace; IP_SALT: 
     ipHash,
     /** At most `max` per UTC day for this reporter, counted per scope. */
     async daily(scope: string, max: number): Promise<Check> {
-      const key = `day:${scope}:${ipHash}:${new Date(now).toISOString().slice(0, 10)}`;
+      const key = `day:${scope}:${ipHash}:${utcDay(now)}`;
       const count = Number((await kv.get(key)) || 0);
       return { ok: count < max, commit: () => kv.put(key, String(count + 1), { expirationTtl: 60 * 60 * 48 }) };
     },
@@ -42,15 +47,14 @@ export interface DailyCap {
 
 /**
  * Counts one attempt against each cap for today (UTC) and says whether all are
- * still within. One D1 batch deletes earlier days and increments and returns
- * each count, so parallel requests can't both slip under a cap. The count goes
- * up before the check, so refused attempts count too.
+ * still within. One D1 batch increments and returns each count, so parallel
+ * requests can't both slip under a cap. The count goes up before the check, so
+ * refused attempts count too. The nightly retention job drops earlier days.
  */
 export async function countDaily(db: D1Database, caps: DailyCap[], now = Date.now()): Promise<boolean> {
-  const day = new Date(now).toISOString().slice(0, 10);
-  const [, ...counts] = await db.batch([
-    db.prepare('DELETE FROM daily_counts WHERE day < ?1').bind(day),
-    ...caps.map((cap) =>
+  const day = utcDay(now);
+  const counts = await db.batch(
+    caps.map((cap) =>
       db
         .prepare(
           `INSERT INTO daily_counts (scope, subject, day, count) VALUES (?1, ?2, ?3, 1)
@@ -59,6 +63,12 @@ export async function countDaily(db: D1Database, caps: DailyCap[], now = Date.no
         )
         .bind(cap.scope, cap.subject, day),
     ),
-  ]);
+  );
   return caps.every((cap, i) => Number((counts[i]?.results[0] as { count: number } | undefined)?.count ?? Infinity) <= cap.max);
+}
+
+/** Today's count for one cap, without counting an attempt. */
+export async function dailyCount(db: D1Database, scope: string, subject: string, now = Date.now()): Promise<number> {
+  const row = await db.prepare('SELECT count FROM daily_counts WHERE scope = ? AND subject = ? AND day = ?').bind(scope, subject, utcDay(now)).first<{ count: number }>();
+  return Number(row?.count ?? 0);
 }

@@ -11,7 +11,7 @@ import type { ApiError } from '@/lib/api';
 import { isError, type ErrorResponse } from '@/lib/runtime';
 import { localSaves, needsSync, type LocalReport, type SavedItem } from '@/lib/saves/store';
 import { sendMessage, type SubmitResponse, type WithdrawResult } from '@/lib/scan/messages';
-import { ago, esc } from './format';
+import { ago, esc, host, panelError, plural } from './format';
 import { mountCheck } from './verify';
 
 const NOUN: Record<ReportKind, string> = { profile: 'person', company: 'company', job: 'job' };
@@ -32,9 +32,8 @@ function said(kind: ReportKind, stance: ReportStance) {
 }
 
 /** Every stance needs at least one reason. */
-export const canSend = (_stance: ReportStance, reasons: string[]) => reasons.length > 0;
+export const canSend = (reasons: string[]) => reasons.length > 0;
 
-const host = (s: string) => new URL(s).host;
 const hosts = (list: string[]) => list.map(host).join(', ');
 
 /**
@@ -87,9 +86,8 @@ export function reportMarkup(kind: ReportKind) {
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 export function countsText(c: ReportCounts) {
-  const parts = [c.reports ? plural(c.reports, 'report') : '', c.vouches ? plural(c.vouches, 'vouch').replace('vouchs', 'vouches') : '', c.impersonated ? `${c.impersonated} impersonation ${c.impersonated === 1 ? 'warning' : 'warnings'}` : ''];
+  const parts = [c.reports ? plural(c.reports, 'report') : '', c.vouches ? plural(c.vouches, 'vouch', 'vouches') : '', c.impersonated ? `${c.impersonated} impersonation ${c.impersonated === 1 ? 'warning' : 'warnings'}` : ''];
   return parts.filter(Boolean).join(', ') || 'no reports';
 }
 
@@ -103,9 +101,9 @@ const ERRORS: Record<string, string> = {
   removed: 'This profile was removed at its owner’s request.',
 };
 export const errorText = (e: ErrorResponse) => ERRORS[e.error] ?? e.message ?? e.error;
-const failed = (e: unknown): ApiError => ({ error: 'panel_error', message: String(e) });
+const failed = (e: unknown): ApiError => panelError(e);
 
-/** Say that something stayed in this browser, with "Send now" (KTD12: never an automatic retry). */
+/** Say that something stayed in this browser, with "Send now" (never an automatic retry). */
 export function showUnsent(why: string, sendNow: () => void) {
   const el = $('submitStatus');
   el.className = 'status err';
@@ -257,7 +255,7 @@ export async function mountReport(key: string, kind: ReportKind, dest: () => Des
     e.preventDefault();
     const reasons = checked();
     const s = stance();
-    if (!canSend(s, reasons)) {
+    if (!canSend(reasons)) {
       $('rfError').textContent = 'Pick at least one reason.';
       return;
     }

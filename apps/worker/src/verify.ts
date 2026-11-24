@@ -17,17 +17,16 @@
 // rather than accepting them unchecked.
 
 import { Hono, type Context } from 'hono';
-import type { VerificationRequired, VerifyResponse, VerifyStatusResponse } from '@fpr/core';
+import { CHALLENGE_MS, type VerificationRequired, type VerifyResponse, type VerifyStatusResponse } from '@fpr/core';
 import type { Env } from './env';
-import { clientIp, hashIp, hashReporter, REPORTER_KEY } from './ip';
-import { countDaily } from './limits';
+import { clientIp, hashIp, hashReporter, REPORTER_KEY, toHex } from './ip';
+import { countDaily, DAY_MS } from './limits';
 
 /** The extension's own origins: the only ones that get CORS or may frame /verify. */
 export const EXTENSION_ORIGIN = /^(chrome-extension|moz-extension|safari-web-extension):\/\/[a-z0-9-]+$/i;
 
 const CHALLENGE = /^[0-9a-f]{32}$/;
-const CHALLENGE_MS = 10 * 60_000;
-const VERIFIED_MS = 90 * 86_400_000;
+const VERIFIED_MS = 90 * DAY_MS;
 const ATTEMPTS_PER_IP = 20;
 const ACTION = 'register';
 const SITEVERIFY = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
@@ -51,11 +50,9 @@ export async function requireVerified(c: C, reporter: string, now = Date.now()):
   if (!env.VERIFY_HOST) return null;
   if (!configured(env)) return c.json({ error: 'verify_unconfigured' }, 503);
   if (await verifiedUntil(env.DB, reporter, now)) return null;
-  const id = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM verify_challenges WHERE expires_at <= ?').bind(now),
-    env.DB.prepare('INSERT INTO verify_challenges (id, reporter, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(id, reporter, now, now + CHALLENGE_MS),
-  ]);
+  const id = toHex(crypto.getRandomValues(new Uint8Array(16)));
+  // Expired challenges are never read; the nightly retention job drops them.
+  await env.DB.prepare('INSERT INTO verify_challenges (id, reporter, created_at, expires_at) VALUES (?, ?, ?, ?)').bind(id, reporter, now, now + CHALLENGE_MS).run();
   const body: VerificationRequired = { error: 'verification_required', verifyUrl: `https://${env.VERIFY_HOST}/verify?challenge=${id}` };
   return c.json(body, 403);
 }
@@ -130,9 +127,11 @@ verify.post('/api/verify', async (c) => {
 
   // Used once: delete and return in one statement, before Siteverify sees it.
   const reporter = key === undefined ? null : await hashReporter(key, c.env.IP_SALT);
-  const consumed = reporter
-    ? await db.prepare('DELETE FROM verify_challenges WHERE id = ? AND reporter = ? AND expires_at > ? RETURNING reporter').bind(challenge, reporter, now).first<{ reporter: string }>()
-    : await db.prepare('DELETE FROM verify_challenges WHERE id = ? AND expires_at > ? RETURNING reporter').bind(challenge, now).first<{ reporter: string }>();
+  // With a key sent, the challenge must be the one issued to it.
+  const consumed = await db
+    .prepare('DELETE FROM verify_challenges WHERE id = ?1 AND expires_at > ?2 AND (?3 IS NULL OR reporter = ?3) RETURNING reporter')
+    .bind(challenge, now, reporter)
+    .first<{ reporter: string }>();
   const failed = () => c.json({ error: 'verify_failed' }, 403);
   if (!consumed) return failed();
 
@@ -146,12 +145,10 @@ verify.post('/api/verify', async (c) => {
   if (out?.success !== true || out.hostname !== host || out.action !== ACTION || out.cdata !== challenge) return failed();
 
   const until = now + VERIFIED_MS;
-  await db.batch([
-    db.prepare('DELETE FROM verified_reporters WHERE expires_at <= ?').bind(now),
-    db
-      .prepare('INSERT INTO verified_reporters (reporter, verified_at, expires_at) VALUES (?1, ?2, ?3) ON CONFLICT (reporter) DO UPDATE SET verified_at = ?2, expires_at = ?3')
-      .bind(consumed.reporter, now, until),
-  ]);
+  await db
+    .prepare('INSERT INTO verified_reporters (reporter, verified_at, expires_at) VALUES (?1, ?2, ?3) ON CONFLICT (reporter) DO UPDATE SET verified_at = ?2, expires_at = ?3')
+    .bind(consumed.reporter, now, until)
+    .run();
   const ok: VerifyResponse = { ok: true, verifiedUntil: until };
   return c.json(ok);
 });

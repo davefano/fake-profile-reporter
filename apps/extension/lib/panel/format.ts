@@ -29,3 +29,11 @@ export function compact(n: number) {
 export function esc(s: string) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
+
+/** A server address as people read it: its host. */
+export const host = (base: string) => new URL(base).host;
+
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** A failed message to the background, as the panel shows errors. */
+export const panelError = (e: unknown) => ({ error: 'panel_error', message: String(e) });

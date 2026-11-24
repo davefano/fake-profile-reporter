@@ -26,11 +26,10 @@ import { scoreProfile, type AdminDecisionResponse, type AdminRemovalsResponse, t
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { clientIp, hashIp, hashReporter, REPORTER_KEY } from './ip';
-import { countDaily } from './limits';
+import { countDaily, DAY_MS, dailyCount, utcDay } from './limits';
 import { countsFrom, reportCounts } from './reports-store';
 import { requireVerified } from './verify';
 
-const DAY_MS = 86_400_000;
 const DENIED_MS = 90 * DAY_MS; // a denial blocks new requests this long
 const RETAIN_MS = 90 * DAY_MS; // contacts on pending requests, and decided requests
 const ORPHAN_SWEEP_MS = 7 * DAY_MS; // approvals the admin list sweeps R2 for again
@@ -138,9 +137,7 @@ removals.use('/api/admin/*', async (c, next) => {
   if (!token || token.length < MIN_ADMIN_TOKEN) return c.notFound();
   const db = c.env.DB;
   const ipHash = await hashIp(clientIp(c.req.raw), c.env.IP_SALT);
-  const day = new Date().toISOString().slice(0, 10);
-  const fails = await db.prepare("SELECT count FROM daily_counts WHERE scope = 'admin.fails.ip' AND subject = ? AND day = ?").bind(ipHash, day).first<{ count: number }>();
-  if (Number(fails?.count ?? 0) >= ADMIN_FAILS_PER_IP) return c.json({ error: 'too_many_attempts' }, 429);
+  if ((await dailyCount(db, 'admin.fails.ip', ipHash)) >= ADMIN_FAILS_PER_IP) return c.json({ error: 'too_many_attempts' }, 429);
   const auth = c.req.header('authorization') ?? '';
   if (!auth.startsWith('Bearer ') || !(await tokenMatches(auth.slice(7), token))) {
     await countDaily(db, [{ scope: 'admin.fails.ip', subject: ipHash, max: ADMIN_FAILS_PER_IP }]);
@@ -308,6 +305,6 @@ export async function retention(db: D1Database, now = Date.now()): Promise<void>
     db.prepare("DELETE FROM removal_requests WHERE decided_at < ? AND status != 'approved_r2_pending'").bind(cutoff),
     db.prepare('DELETE FROM verify_challenges WHERE expires_at <= ?').bind(now),
     db.prepare('DELETE FROM verified_reporters WHERE expires_at <= ?').bind(now),
-    db.prepare('DELETE FROM daily_counts WHERE day < ?').bind(new Date(now).toISOString().slice(0, 10)),
+    db.prepare('DELETE FROM daily_counts WHERE day < ?').bind(utcDay(now)),
   ]);
 }

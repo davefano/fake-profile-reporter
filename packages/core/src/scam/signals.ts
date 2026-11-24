@@ -66,7 +66,15 @@ export function signalAdder(signals: Signal[]) {
   };
 }
 
-const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
+/** Levels in order, for comparing them. */
+export const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
+
+/** A signal's strength; stored scores before rules v6 have none, so |weight| ≥ 12 reads as major. A zero weight earns nothing. */
+export function signalStrength(x: Signal): 'major' | 'minor' | 'none' {
+  if (x.strength) return x.strength;
+  if (x.weight === 0) return 'none';
+  return Math.abs(x.weight) >= 12 ? 'major' : 'minor';
+}
 
 /** Sum, clamp, sort, and raise the level to the highest floor. Shared by every scorer. */
 export function finishScore(signals: Signal[], missing: string[]): Score {

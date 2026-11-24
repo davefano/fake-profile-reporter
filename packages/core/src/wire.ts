@@ -79,6 +79,9 @@ export interface ReportResponse {
  * `verify_failed` from POST /api/verify, 503 `verify_unconfigured` when the
  * server is set up for the check but missing a key.
  */
+/** How long a bot-check challenge ID stays valid on the server. */
+export const CHALLENGE_MS = 10 * 60_000;
+
 export interface VerificationRequired {
   error: 'verification_required';
   /** https://<verify host>/verify?challenge=<id>. Carries no key material. */

@@ -198,13 +198,12 @@ describe('daily report caps', () => {
     expect((await withdraw('profile', 700_000_001, KEY_A)).status).toBe(200);
   });
 
-  test("yesterday's counts don't count today, and are deleted on today's first report", async () => {
+  test("yesterday's counts don't count today (the nightly retention job deletes them)", async () => {
     await saveProfile(700_000_001);
     setSystemTime(new Date(Date.UTC(2026, 10, 23, 12)));
     for (let i = 0; i < 51; i++) await put('profile', 700_000_001, suspicious, KEY_A);
     expect((await put('profile', 700_000_001, suspicious, KEY_A)).status).toBe(429);
     setSystemTime(new Date(Date.UTC(2026, 10, 24, 0, 0, 1)));
     expect((await put('profile', 700_000_001, suspicious, KEY_A)).status).toBe(200);
-    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM daily_counts WHERE day < '2026-11-24'").first()).toEqual({ n: 0 });
   });
 });

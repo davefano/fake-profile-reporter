@@ -84,13 +84,16 @@ export function saveStore(area: Area) {
       if (next !== item) await put(next);
       return next;
     },
-    async markUploaded(key: string, server: string) {
+    /** Record that `server` has this version, and the target ID it gave, in one write; the item after. */
+    async markUploaded(key: string, server: string, targetId?: string | null): Promise<SavedItem | undefined> {
       const item = await get(key);
-      if (item && !item.uploadedTo.includes(server)) await put({ ...item, uploadedTo: [...item.uploadedTo, server] });
-    },
-    async setTargetId(key: string, targetId: string) {
-      const item = await get(key);
-      if (item && item.targetId !== targetId) await put({ ...item, targetId });
+      if (!item) return undefined;
+      const uploaded = item.uploadedTo.includes(server);
+      const newId = targetId && targetId !== item.targetId;
+      if (uploaded && !newId) return item;
+      const next = { ...item, uploadedTo: uploaded ? item.uploadedTo : [...item.uploadedTo, server], targetId: newId ? targetId : item.targetId };
+      await put(next);
+      return next;
     },
     /** Add imported items; for items already here, keep the newer save. */
     async merge(items: SavedItem[]): Promise<{ added: number; updated: number }> {

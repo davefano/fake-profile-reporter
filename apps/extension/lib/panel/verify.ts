@@ -1,21 +1,21 @@
-// The bot check in the panel (KTD6). A server that wants it answers a report
+// The bot check in the panel. A server that wants it answers a report
 // with `verification_required` and a `verifyUrl`; the panel frames that page
 // inline, takes the token it posts back, and hands it to the background. The
 // Safari popup can't keep a frame open, so it opens the page in a tab instead
 // and the background polls until the check has passed.
 //
 // startCheck() is the inline flow with its browser parts passed in; mountCheck()
-// wires it to a box in the panel. U9's removal request reuses both.
+// wires it to a box in the panel. removal.ts reuses both.
 
-import type { VerifyMessage } from '@fpr/core/wire';
+import { CHALLENGE_MS, type VerifyMessage } from '@fpr/core/wire';
 import { isError } from '@/lib/runtime';
 import { sendMessage } from '@/lib/scan/messages';
 import { esc } from './format';
 
 /** Without a load by then, the check didn't render. */
 export const LOAD_WAIT_MS = 15_000;
-/** Challenges last 10 minutes on the server: ask for a fresh one a little before. */
-export const RENEW_MS = 9 * 60_000;
+/** Ask for a fresh challenge a minute before the server's expires. */
+export const RENEW_MS = CHALLENGE_MS - 60_000;
 const CHALLENGE = /^[0-9a-f]{32}$/;
 
 /**
