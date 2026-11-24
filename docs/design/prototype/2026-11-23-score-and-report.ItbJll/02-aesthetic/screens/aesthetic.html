@@ -1,0 +1,774 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype · panel aesthetic</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Geist+Pixel&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/dialkit@2.0.0/dist/vanilla/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/dialkit@2.0.0/dist/vanilla/browser.global.js"></script>
+<style>
+/* ---------- prototype chrome (not product) ---------- */
+html, body { margin: 0; }
+body { font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; background: #d9d7d2; color: #222; min-height: 100vh; }
+.stage { display: flex; gap: 24px; align-items: flex-start; padding: 20px; }
+.ctl { position: sticky; top: 20px; width: 230px; flex: none; display: grid; gap: 14px; font-size: 12px; }
+.ctl h1 { font-size: 13px; margin: 0; }
+.ctl p.mock { margin: 0; color: #8a5a00; }
+.ctl fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
+.ctl legend { font-weight: 650; margin-bottom: 2px; padding: 0; }
+.ctl label { display: grid; grid-template-columns: 16px 1fr; column-gap: 6px; align-items: baseline; cursor: pointer; }
+.ctl label small { grid-column: 2; color: #666; }
+.ctl button { font: inherit; padding: 6px 10px; border: 1px solid #888; background: #fff; cursor: pointer; color: #222; }
+.ctl .copied { color: #23793a; }
+.ctl input[readonly] { width: 100%; font: 11px ui-monospace, monospace; }
+.ctl-toggle { display: none; }
+.frame { flex: none; overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / .2), 0 10px 30px rgb(0 0 0 / .18); }
+@media (max-width: 600px) {
+  .stage { flex-direction: column; padding: 0; gap: 0; }
+  .ctl { position: static; width: auto; padding: 12px 16px; background: rgb(0 0 0 / .05); }
+  .ctl-toggle { display: block; }
+  .ctl.closed > :not(.ctl-toggle) { display: none; }
+  .frame { width: 100% !important; box-shadow: none; }
+}
+
+/* ---------- product panel: shared structure (layout A) ---------- */
+.p {
+  --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --mono: "JetBrains Mono", "JetBrainsMono Nerd Font", ui-monospace, "SF Mono", Menlo, monospace;
+  background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased; min-height: 780px; position: relative;
+}
+/* Omarchy palettes: backgrounds, text and accent from the theme; flag/ok/warn are ours (theme colour names aren't meanings). */
+.p[data-pal="tokyo-night"] { --bg:#1a1b26; --raised:#24283b; --deep:#13141c; --line:#292e42; --line2:#414868; --text:#c0caf5; --text2:#a9b1d6; --text3:#7c84ad; --accent:#7aa2f7; --flag:#ff7a85; --ok:#8fd9a2; --warn:#e0af68; --on-accent:#13141c; color-scheme: dark; }
+.p[data-pal="matte-black"] { --bg:#121212; --raised:#1e1e1e; --deep:#0d0d0d; --line:#2a2a2a; --line2:#3a3a3a; --text:#e4e4e4; --text2:#bebebe; --text3:#8a8a8d; --accent:#e68e0d; --flag:#ff7a72; --ok:#8fd99b; --warn:#e6b94d; --on-accent:#121212; color-scheme: dark; }
+.p[data-pal="lumon"] { --bg:#16242d; --raised:#1b2d40; --deep:#101b21; --line:#243d56; --line2:#304860; --text:#f2fcff; --text2:#d6e2ee; --text3:#93b6d1; --accent:#8bc9eb; --flag:#ff8f94; --ok:#90dbab; --warn:#f0c26a; --on-accent:#101b21; color-scheme: dark; }
+.p[data-pal="ink"] { --bg:#0f0f10; --raised:#18181a; --deep:#0a0a0b; --line:#232326; --line2:#34343a; --text:#ededee; --text2:#b9b9bf; --text3:#8b8b93; --accent:#3d9bff; --flag:#ff6b7d; --ok:#5fe0a0; --warn:#ffb54d; --on-accent:#0a0a0b; color-scheme: dark; }
+.p[data-pal="flexoki-light"] { --bg:#FFFCF0; --raised:#F2F0E5; --deep:#E6E4D9; --line:#E6E4D9; --line2:#CECDC3; --text:#100F0F; --text2:#403E3C; --text3:#6F6E69; --accent:#205EA6; --flag:#AF3029; --ok:#66800B; --warn:#AD8301; --on-accent:#FFFCF0; color-scheme: light; }
+
+.p * { box-sizing: border-box; }
+.p :where(h1, h2, h3, p, ul, dl, dd) { margin: 0; padding: 0; }
+.p :where(ul) { list-style: none; }
+.p :where(button) { font: inherit; color: inherit; }
+.p :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); }
+
+.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line); }
+.bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px 0; }
+.appname { font-weight: 600; font-size: 13px; }
+.dest { font: 12px var(--mono); color: var(--text3); }
+.bar .sp { flex: 1; }
+.ib { width: 28px; height: 28px; border: 0; background: none; color: var(--text3); display: grid; place-items: center; cursor: pointer; }
+.ib:hover { background: var(--raised); color: var(--text); }
+.ib[aria-pressed="true"] { background: var(--raised); color: var(--text); }
+.ib svg { width: 16px; height: 16px; }
+.tabs { display: flex; gap: 16px; padding: 6px 16px 0; }
+.tabs button { border: 0; background: none; padding: 6px 0 8px; font-size: 13px; color: var(--text3); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--text); border-color: var(--accent); }
+
+.main { padding: 16px 16px 120px; display: grid; gap: 18px; }
+.who { display: flex; gap: 12px; align-items: center; }
+.av { width: 42px; height: 42px; background: var(--raised); display: grid; place-items: center; font: 600 14px var(--mono); color: var(--text2); flex: none; }
+.who h1 { font-size: 16px; font-weight: 650; line-height: 1.25; }
+.who p { font-size: 13px; color: var(--text2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.who .meta { font: 12px var(--mono); color: var(--text3); margin-top: 2px; }
+
+.lvl h2 { font-size: 20px; font-weight: 650; letter-spacing: -.015em; line-height: 1.2; }
+.lvl p { margin-top: 4px; color: var(--text2); font-size: 13.5px; max-width: 46ch; text-wrap: pretty; }
+.lvl .tag { display: inline-block; font: 600 11px var(--mono); padding: 2px 6px; margin-bottom: 8px; }
+.lvl.high .tag { color: var(--flag); border: 1px solid var(--flag); }
+.lvl.medium .tag { color: var(--warn); border: 1px solid var(--warn); }
+.lvl.low .tag { color: var(--ok); border: 1px solid var(--ok); }
+
+.bal { display: grid; gap: 8px; }
+.bal-row { display: grid; grid-template-columns: 9em 1fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.bal-row .lab { color: var(--text2); }
+.bal-row .n { font: 12px var(--mono); color: var(--text3); text-align: right; min-width: 7.5em; font-variant-numeric: tabular-nums; }
+.track { height: 8px; background: var(--raised); position: relative; }
+.track i { position: absolute; inset: 0 auto 0 0; }
+.fl .track i { background: var(--flag); } .fv .track i { background: var(--ok); }
+.segs { display: flex; gap: 2px; }
+.segs b { height: 10px; flex: 1; background: var(--line2); opacity: .55; }
+.segs b.on { opacity: 1; }
+.fl .segs b.on { background: var(--flag); } .fv .segs b.on { background: var(--ok); }
+
+.cols { display: grid; gap: 18px; }
+.col h3 { font-size: 13px; font-weight: 650; display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.col h3 small { font: 12px var(--mono); color: var(--text3); }
+.col li { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.col li:first-child { border-top: 0; }
+.col li .mk { font: 600 13px var(--mono); line-height: 1.5; }
+.against .mk { color: var(--flag); } .for .mk { color: var(--ok); }
+.col li .why { display: block; color: var(--text3); font-size: 12px; }
+.col li .str { font: 11px var(--mono); color: var(--text3); padding-top: 2px; }
+.col li.major .t { font-weight: 600; }
+.against li.major .str { color: var(--flag); }
+
+.nc { font-size: 12.5px; color: var(--text2); }
+.nc .mk { font-family: var(--mono); color: var(--text3); margin-right: 6px; }
+.facts { padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.p[data-look="tiled"] .facts { border-bottom: 0; padding-bottom: 0; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding-top: 14px; border-top: 1px solid var(--line); }
+.facts dt { font: 11.5px var(--mono); color: var(--text3); }
+.facts dd { font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+.facts dd small { display: block; font-weight: 400; color: var(--text3); font-size: 12px; }
+.foot { font-size: 12px; color: var(--text3); }
+.foot button { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+
+/* actions + report flow */
+.act { position: sticky; bottom: 0; z-index: 2; background: var(--bg); border-top: 1px solid var(--line); padding: 12px 16px 14px; margin: 0 -16px; }
+.act.open { position: static; }
+.row { display: flex; gap: 8px; }
+.btn { padding: 8px 12px; font-weight: 600; font-size: 13px; cursor: pointer; border: 1px solid var(--line2); background: var(--bg); color: var(--text); }
+.btn:hover:not(:disabled) { background: var(--raised); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn.grow { flex: 1; }
+.btn.danger { background: var(--flag); border-color: var(--flag); color: var(--bg); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.danger:hover:not(:disabled), .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.lnk { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 13px; }
+.lnk:hover { text-decoration: underline; text-underline-offset: 2px; }
+.lnk.quiet { color: var(--text2); }
+.alt { margin-top: 8px; font-size: 12.5px; color: var(--text3); }
+.sheet { display: grid; gap: 14px; }
+.sheet h3 { font-size: 14px; font-weight: 650; }
+.sheet fieldset { border: 0; padding: 0; margin: 0; }
+.fl-l { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 6px; display: block; padding: 0; }
+.fl-l span { font-weight: 400; color: var(--text3); }
+.seg { display: grid; gap: 6px; }
+.seg label { display: grid; grid-template-columns: 18px 1fr; gap: 8px; padding: 8px 10px; border: 1px solid var(--line2); cursor: pointer; font-size: 13px; }
+.seg label:has(input:checked) { border-color: var(--accent); background: var(--raised); }
+.seg input, .sure input { margin: 3px 0 0; accent-color: var(--accent); }
+.seg small { display: block; color: var(--text3); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips label { display: inline-flex; align-items: center; padding: 5px 9px; border: 1px solid var(--line2); font-size: 12.5px; cursor: pointer; }
+.chips label:has(input:checked) { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.chips input { position: absolute; opacity: 0; pointer-events: none; }
+.chips label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sure { display: flex; gap: 14px; font-size: 13px; }
+.sure label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+textarea.note { width: 100%; min-height: 64px; resize: vertical; font: 13px var(--sans); color: var(--text); background: var(--deep); border: 1px solid var(--line2); padding: 8px 10px; }
+.note-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text3); margin-top: 4px; }
+.note-meta .mono { font-size: 11.5px; }
+.err { color: var(--flag); font-size: 12.5px; }
+.done { display: grid; gap: 4px; }
+.done .what { font-size: 13px; } .done .what b { font-weight: 600; }
+.done .sub { font: 12px var(--mono); color: var(--text3); }
+.done .row { margin-top: 6px; gap: 14px; align-items: center; }
+.done.offline .sub { color: var(--warn); }
+.toast { font-size: 12.5px; color: var(--ok); margin-bottom: 8px; }
+
+/* ===== Look 1: terminal, made friendly ===== */
+/* Square, hairlines, mono for every label and datum; sentences stay in Inter. */
+.p[data-look="term"] .appname { font-family: var(--mono); font-weight: 600; }
+.p[data-look="term"] .appname::before { content: "› "; color: var(--accent); }
+.p[data-look="term"] .tabs button { font-family: var(--mono); font-size: 12.5px; }
+.p[data-look="term"] .lvl .tag::before { content: "status: "; color: var(--text3); font-weight: 400; }
+.p[data-look="term"] .lvl .tag { border: 0; padding: 0; }
+.p[data-look="term"] .col h3 { font: 600 12.5px var(--mono); }
+.p[data-look="term"] .col h3 small::before { content: "n="; }
+.p[data-look="term"] .col li { border-top-style: dashed; }
+.p[data-look="term"] .facts { grid-template-columns: 1fr; gap: 2px; border-top-style: dashed; }
+.p[data-look="term"] .facts > div { display: grid; grid-template-columns: 7.5em 1fr; gap: 10px; font-family: var(--mono); font-size: 12.5px; }
+.p[data-look="term"] .facts dt::after { content: ""; }
+.p[data-look="term"] .facts dd { font-weight: 500; }
+.p[data-look="term"] .facts dd small { display: inline; margin-left: 8px; font-size: 12px; }
+.p[data-look="term"] .track { height: 6px; }
+.p[data-look="term"] .btn, .p[data-look="term"] .chips label { font-family: var(--mono); font-size: 12.5px; }
+.p[data-look="term"] .foot { font-family: var(--mono); font-size: 11.5px; }
+
+/* ===== Look 2: tiled panes ===== */
+/* Each section is a window: square border, a title set into the top edge, gaps like Hyprland. The focused pane gets the accent border. */
+.p[data-look="tiled"] { background: var(--deep); }
+.p[data-look="tiled"] .top { background: var(--deep); }
+.p[data-look="tiled"] .main { gap: 10px; padding-top: 12px; }
+.p[data-look="tiled"] .pane { position: relative; border: 1px solid var(--line2); background: var(--bg); padding: 16px 12px 12px; }
+.p[data-look="tiled"] .pane.focus { border: 2px solid var(--accent); padding: 15px 11px 11px; }
+.p[data-look="tiled"] .pane > .pt { position: absolute; top: -8px; left: 8px; padding: 0 6px; background: var(--deep); font: 500 11.5px var(--mono); color: var(--text3); line-height: 15px; }
+.p[data-look="tiled"] .pane.focus > .pt { color: var(--accent); top: -9px; }
+.p[data-look="tiled"] .who { padding: 2px 0; }
+.p[data-look="tiled"] .facts { border-top: 0; padding-top: 0; }
+.p[data-look="tiled"] .act { background: var(--deep); }
+.p[data-look="tiled"] .act .sheet, .p[data-look="tiled"] .act .done { border: 2px solid var(--accent); background: var(--bg); padding: 14px 12px 12px; position: relative; }
+.p[data-look="tiled"] .tabs button[aria-selected="true"] { border-color: var(--accent); }
+
+/* ===== Look 3: instrument readout ===== */
+/* One accent, segmented gauges, numbers that line up; plain sentences, generous spacing. */
+.p[data-look="readout"] .main { gap: 22px; }
+.p[data-look="readout"] .lvl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; align-items: center; }
+.p[data-look="readout"] .lvl .tag { grid-row: span 2; margin: 0; width: 64px; height: 64px; display: grid; place-items: center; font: 700 26px var(--mono); padding: 0; border-width: 2px; }
+.p[data-look="readout"] .lvl p { margin-top: 0; }
+.p[data-look="readout"] .bal { gap: 12px; padding: 12px; background: var(--raised); }
+.p[data-look="readout"] .bal-row { grid-template-columns: 1fr; gap: 6px; }
+.p[data-look="readout"] .bal-row .top-l { display: flex; justify-content: space-between; font-size: 13px; }
+.p[data-look="readout"] .bal-row .top-l b { font: 600 13px var(--mono); }
+.p[data-look="readout"] .fl .top-l b { color: var(--flag); } .p[data-look="readout"] .fv .top-l b { color: var(--ok); }
+.p[data-look="readout"] .col li .str { font-weight: 600; }
+.p[data-look="readout"] .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); padding: 0; }
+.p[data-look="readout"] .facts > div { background: var(--bg); padding: 8px 10px; }
+.p[data-look="readout"] .facts dd { font: 600 15px var(--mono); }
+.p[data-look="readout"] .facts dd small { font-family: var(--sans); }
+
+/* ===== settings screen ===== */
+.set { display: grid; gap: 28px; }
+.set h2 { font-size: 18px; font-weight: 650; }
+.p[data-look="mix"] .set h2, .p[data-look="dither"] .set h2 { font: 400 24px var(--pixel); }
+.set section { display: grid; gap: 10px; }
+.set h3 { font-size: 13px; font-weight: 650; display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: center; }
+.set h3 .rule { height: 6px; background: repeating-conic-gradient(var(--line2) 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.set .hint { font-size: 12.5px; color: var(--text3); margin-top: -4px; }
+.opts { display: grid; gap: 8px; }
+.opt { display: grid; grid-template-columns: 18px 1fr; gap: 10px; padding: 10px 12px; border: 1px solid var(--line2); cursor: pointer; font-size: 13.5px; border-radius: var(--radius, 0); align-items: start; }
+.opt:has(input:checked) { border-color: var(--accent); background: var(--raised); }
+.opt input { margin: 3px 0 0; accent-color: var(--accent); }
+.opt small { display: block; color: var(--text3); font-size: 12px; }
+.opt small .om { font-family: var(--mono); }
+.pals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.pal { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 8px; border: 1px solid var(--line2); cursor: pointer; border-radius: var(--radius, 0); }
+.pal:has(input:checked) { border: 2px solid var(--accent); padding: 7px; }
+.pal:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pal input { position: absolute; opacity: 0; pointer-events: none; }
+.pal .sw { box-shadow: inset 0 0 0 1px var(--line2); height: 52px; display: grid; grid-template-columns: 1fr auto; padding: 8px; gap: 4px; border-radius: calc(var(--radius, 0px) / 2); }
+.pal .sw .lines { display: grid; gap: 4px; align-content: start; }
+.pal .sw .lines i { display: block; height: 4px; border-radius: 1px; }
+.pal .sw .dots { display: grid; grid-auto-flow: column; gap: 3px; align-self: end; }
+.pal .sw .dots i { width: 9px; height: 9px; display: block; }
+.pal .sw.split { background: linear-gradient(135deg, var(--a-bg) 0 50%, var(--b-bg) 50% 100%) !important; }
+.pal b { font-size: 13px; font-weight: 600; }
+.pal small { display: block; font-size: 11.5px; color: var(--text3); margin-top: -6px; }
+.pal .om { font: 10.5px var(--mono); color: var(--text3); }
+.p .btn-row2 { display: flex; gap: 8px; }
+
+/* ===== Look 5: readout x dither (tuned with DialKit) ===== */
+.p[data-look="mix"] {
+  --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif; --mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace; --pixel: "Geist Pixel", "Geist Mono", ui-monospace, monospace;
+  --gap: 32px; --gutter: 24px; --row-pad: 12px; --radius: 4px; --body: 14px; --h: 28px; --tag: 56px; --tag-bw: 2px; --gauge-h: 20px; --box-pad: 16px; --fact-v: 16px; --av: 56px;
+}
+.p[data-look="mix"] .main { gap: var(--gap); padding-left: var(--gutter); padding-right: var(--gutter); }
+.p[data-look="mix"] .bar, .p[data-look="mix"] .tabs { padding-left: var(--gutter); padding-right: var(--gutter); }
+.p[data-look="mix"] .act { margin: 0 calc(var(--gutter) * -1); padding-left: var(--gutter); padding-right: var(--gutter); }
+.p[data-look="mix"] .appname { font: 400 15px var(--pixel); }
+.p[data-look="mix"] .dest, .p[data-look="mix"] .who .meta, .p[data-look="mix"] .facts dt { text-transform: lowercase; }
+.p[data-look="mix"] .av { background: none; width: var(--av); height: var(--av); }
+.p[data-look="mix"] .av canvas { width: 100%; height: 100%; image-rendering: pixelated; display: block; border-radius: var(--radius); }
+.p[data-look="mix"] .who { align-items: start; }
+.p[data-look="mix"] .who h1 { text-box: trim-start cap alphabetic; }
+.p[data-look="mix"] .lvl { position: relative; isolation: isolate; display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto 1fr; gap: 8px 14px; align-items: start; }
+.p[data-look="mix"] .lvl canvas.wash { position: absolute; inset: calc(var(--gap) * -0.4) calc(var(--gutter) * -1); width: calc(100% + var(--gutter) * 2); height: calc(100% + var(--gap) * 0.8); z-index: -1; image-rendering: pixelated; }
+.p[data-look="mix"] .lvl .tag { grid-row: span 2; margin: 0; width: var(--tag); height: var(--tag); display: grid; place-items: center; font: 400 calc(var(--tag) * 0.34) var(--pixel); padding: 0; border-width: var(--tag-bw); border-radius: var(--radius); }
+.p[data-look="mix"][data-tag="dither"] .lvl .tag { border: 0; background: radial-gradient(currentColor 1px, transparent 1.3px) 0 0 / 4px 4px; color: inherit; }
+.p[data-look="mix"][data-tag="dither"] .lvl.high .tag { color: var(--flag); } .p[data-look="mix"][data-tag="dither"] .lvl.medium .tag { color: var(--warn); } .p[data-look="mix"][data-tag="dither"] .lvl.low .tag { color: var(--ok); }
+.p[data-look="mix"][data-tag="dither"] .lvl .tag span { background: var(--bg); padding: 2px 4px; }
+.p[data-look="mix"][data-tag="none"] .lvl { grid-template-columns: 1fr; } .p[data-look="mix"][data-tag="none"] .lvl .tag { display: none; }
+.p[data-look="mix"] .lvl h2 { font: 400 var(--h)/1.05 var(--pixel); letter-spacing: 0; text-box: trim-start cap alphabetic; }
+.p[data-look="mix"] .lvl p { margin-top: 0; font-size: var(--body); }
+.p[data-look="mix"] .bal { gap: calc(var(--box-pad) * 0.9); padding: var(--box-pad); background: var(--raised); border-radius: var(--radius); }
+.p[data-look="mix"][data-box="line"] .bal { background: none; border: 1px solid var(--line2); }
+.p[data-look="mix"][data-box="none"] .bal { background: none; padding: 0; }
+.p[data-look="mix"] .bal-row { grid-template-columns: 1fr; gap: 6px; }
+.p[data-look="mix"] .bal-row .top-l { display: flex; justify-content: space-between; font-size: 13px; }
+.p[data-look="mix"] .bal-row .top-l b { font: 500 12.5px var(--mono); }
+.p[data-look="mix"] .fl .top-l b { color: var(--flag); } .p[data-look="mix"] .fv .top-l b { color: var(--ok); }
+.p[data-look="mix"] .dz { display: block; width: 100%; height: var(--gauge-h); image-rendering: pixelated; }
+.p[data-look="mix"] .col h3 { font: 500 13px var(--sans); display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
+.p[data-look="mix"] .rule { height: 6px; background: repeating-conic-gradient(var(--line2) 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.p[data-look="mix"] .col li { padding: var(--row-pad) 0; font-size: var(--body); }
+.p[data-look="mix"] .col li .str { font: 500 11px var(--mono); }
+.p[data-look="mix"] .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); padding: 0; border-radius: var(--radius); overflow: hidden; }
+.p[data-look="mix"] .facts > div { background: var(--bg); padding: 8px 10px; }
+.p[data-look="mix"] .facts dd { font: 500 var(--fact-v) var(--mono); }
+.p[data-look="mix"] .facts dd small { font: 400 12px var(--sans); }
+.p[data-look="mix"][data-facts="lines"] .facts { background: none; border: 0; border-top: 1px dotted var(--line2); border-bottom: 1px dotted var(--line2); gap: 12px; padding-block: 12px; border-radius: 0; }
+.p[data-look="mix"][data-facts="lines"] .facts > div { padding: 0; background: none; }
+.p[data-look="mix"] .btn, .p[data-look="mix"] .seg label, .p[data-look="mix"] .chips label, .p[data-look="mix"] textarea.note { border-radius: var(--radius); }
+.p[data-look="mix"] .btn.danger { background-image: radial-gradient(rgb(0 0 0 / .18) 1px, transparent 1.2px); background-size: 4px 4px; }
+.p[data-look="mix"] .btn.danger:hover:not(:disabled) { background-size: 3px 3px; filter: none; }
+
+/* Look 5 type: one family. Geist everywhere, weights 400/600, sizes 12/13/14/16/28, tabular figures for data. */
+.p[data-look="mix"] { --mono: var(--sans); --pixel: var(--sans); font-variant-numeric: tabular-nums; }
+.p[data-look="mix"] .appname { font: 600 13px var(--sans); }
+.p[data-look="mix"] .dest { font: 400 12px var(--sans); text-transform: none; }
+.p[data-look="mix"] .tabs button { font-size: 13px; }
+.p[data-look="mix"] .who h1 { font-size: 16px; font-weight: 600; }
+.p[data-look="mix"] .who p { font-size: 13px; }
+.p[data-look="mix"] .who .meta { font: 400 12px var(--sans); text-transform: none; }
+.p[data-look="mix"] .lvl h2 { font: 600 var(--h)/1.1 var(--sans); letter-spacing: -0.02em; }
+.p[data-look="mix"] .lvl .tag { font: 600 13px var(--sans); }
+.p[data-look="mix"] .bal-row .top-l { font-size: 13px; }
+.p[data-look="mix"] .bal-row .top-l b { font: 600 13px var(--sans); }
+.p[data-look="mix"] .col h3 { font: 600 13px var(--sans); }
+.p[data-look="mix"] .col h3 small { font: 400 12px var(--sans); }
+.p[data-look="mix"] .col li .mk { font: 600 13px var(--sans); }
+.p[data-look="mix"] .col li.major .t { font-weight: 600; }
+.p[data-look="mix"] .col li .why { font-size: 12px; }
+.p[data-look="mix"] .col li .str { font: 400 12px var(--sans); }
+.p[data-look="mix"] .nc { font-size: 13px; }
+.p[data-look="mix"] .nc .mk { font-family: var(--sans); }
+.p[data-look="mix"] .facts dt { font: 400 12px var(--sans); text-transform: none; }
+.p[data-look="mix"] .facts dd { font: 600 var(--fact-v) var(--sans); }
+.p[data-look="mix"] .facts dd small { font: 400 12px var(--sans); }
+.p[data-look="mix"] .foot, .p[data-look="mix"] .foot button { font-size: 12px; }
+.p[data-look="mix"] .btn { font: 600 13px var(--sans); }
+.p[data-look="mix"] .lnk, .p[data-look="mix"] .alt { font-size: 13px; }
+.p[data-look="mix"] .sheet h3 { font-size: 16px; font-weight: 600; }
+.p[data-look="mix"] .fl-l { font-size: 12px; font-weight: 600; }
+.p[data-look="mix"] .seg label, .p[data-look="mix"] .sure, .p[data-look="mix"] textarea.note { font-size: 13px; }
+.p[data-look="mix"] .seg small { font-size: 12px; }
+.p[data-look="mix"] .chips label { font-size: 13px; }
+.p[data-look="mix"] .note-meta, .p[data-look="mix"] .note-meta .mono { font: 400 12px var(--sans); }
+.p[data-look="mix"] .done .what { font-size: 13px; }
+.p[data-look="mix"] .done .sub { font: 400 12px var(--sans); }
+.p[data-look="mix"] .err, .p[data-look="mix"] .toast { font-size: 13px; }
+.p[data-look="mix"] .set h2 { font: 600 28px/1.1 var(--sans); letter-spacing: -0.02em; }
+.p[data-look="mix"] .set h3 { font-size: 13px; font-weight: 600; }
+.p[data-look="mix"] .set .hint { font-size: 13px; }
+.p[data-look="mix"] .opt { font-size: 14px; }
+.p[data-look="mix"] .opt small, .p[data-look="mix"] .pal small, .p[data-look="mix"] .pal .om { font: 400 12px var(--sans); }
+.p[data-look="mix"] .pal b { font-size: 13px; font-weight: 600; }
+
+/* ===== Look 4: dither ===== */
+/* After dither-kit: ordered-dither (Bayer) fills drawn on canvas, a pixel face for the verdict, Geist for text, checker rules beside section titles, a generated pixel avatar. */
+.p[data-look="dither"] { --sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif; --mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace; --pixel: "Geist Pixel", "Geist Mono", ui-monospace, monospace; }
+.p[data-look="dither"] .appname { font: 400 15px var(--pixel); letter-spacing: .01em; }
+.p[data-look="dither"] .dest, .p[data-look="dither"] .who .meta, .p[data-look="dither"] .facts dt { text-transform: lowercase; }
+.p[data-look="dither"] .av { background: none; width: 40px; height: 40px; }
+.p[data-look="dither"] .av canvas { width: 40px; height: 40px; image-rendering: pixelated; display: block; }
+.p[data-look="dither"] .lvl { position: relative; padding: 14px 12px 14px; margin: 0 -12px; isolation: isolate; }
+.p[data-look="dither"] .lvl canvas.wash { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; image-rendering: pixelated; }
+.p[data-look="dither"] .lvl .tag { border: 0; padding: 0; font: 400 12px var(--mono); margin-bottom: 4px; }
+.p[data-look="dither"] .lvl h2 { font: 400 30px/1.05 var(--pixel); letter-spacing: 0; }
+.p[data-look="dither"] .dz { display: block; width: 100%; height: 14px; image-rendering: pixelated; }
+.p[data-look="dither"] .bal-row { grid-template-columns: 9em 1fr auto; }
+.p[data-look="dither"] .col h3 { font: 500 13px var(--sans); display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; }
+.p[data-look="dither"] .rule { height: 6px; background: repeating-conic-gradient(var(--line2) 0 25%, transparent 0 50%) 0 0 / 4px 4px; }
+.p[data-look="dither"] .col li .str { font-family: var(--mono); }
+.p[data-look="dither"] .btn { border-radius: 6px; }
+.p[data-look="dither"] .btn.danger { background-image: radial-gradient(rgb(0 0 0 / .18) 1px, transparent 1.2px); background-size: 4px 4px; }
+.p[data-look="dither"] .btn.danger:hover:not(:disabled) { background-size: 3px 3px; filter: none; }
+.p[data-look="dither"] .seg label, .p[data-look="dither"] .chips label, .p[data-look="dither"] textarea.note { border-radius: 6px; }
+.p[data-look="dither"] .facts { border-top-style: dotted; border-bottom-style: dotted; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <aside class="ctl" id="ctl" aria-label="Prototype controls">
+    <button class="ctl-toggle" id="ctlToggle" aria-expanded="true">Prototype controls</button>
+    <h1>Prototype controls</h1>
+    <p class="mock">Layout A. Mock data and a mock server. Nothing is sent anywhere.</p>
+    <fieldset><legend>Look</legend>
+      <label><input type="radio" name="look" value="term"> 1 · Terminal, made friendly <small>Hairlines, monospace labels and data, sentences in a sans</small></label>
+      <label><input type="radio" name="look" value="tiled"> 2 · Tiled panes <small>Sections as windows; the focused one gets the accent border</small></label>
+      <label><input type="radio" name="look" value="readout"> 3 · Instrument readout <small>Segmented gauges and aligned numbers, one accent</small></label>
+      <label><input type="radio" name="look" value="dither"> 4 · Dither <small>After dither-kit: dithered gauges, pixel face, generated avatar</small></label>
+      <label><input type="radio" name="look" value="mix"> 5 · Readout × Dither <small>Tune it with the DialKit panel (top right)</small></label>
+    </fieldset>
+    <fieldset><legend>Facts position</legend>
+      <label><input type="radio" name="facts" value="mid"> Under the assessment</label>
+      <label><input type="radio" name="facts" value="top"> Under the profile</label>
+    </fieldset>
+    <fieldset><legend>Palette <small style="font-weight:400;color:#666">(also in the panel's Settings)</small></legend>
+      <label><input type="radio" name="pal" value="system"> Match my system <small>Paper by day, Slate at night</small></label>
+      <label><input type="radio" name="pal" value="flexoki-light"> Paper <small>Omarchy Flexoki Light</small></label>
+      <label><input type="radio" name="pal" value="lumon"> Slate <small>Omarchy Lumon</small></label>
+      <label><input type="radio" name="pal" value="tokyo-night"> Midnight <small>Omarchy Tokyo Night</small></label>
+      <label><input type="radio" name="pal" value="matte-black"> Charcoal <small>Omarchy Matte Black</small></label>
+      <label><input type="radio" name="pal" value="ink"> Ink <small>After dither-kit</small></label>
+    </fieldset>
+    <fieldset><legend>Screen</legend>
+      <label><input type="radio" name="view" value="page"> This page</label>
+      <label><input type="radio" name="view" value="settings"> Settings</label>
+    </fieldset>
+    <fieldset><legend>Profile</legend>
+      <label><input type="radio" name="scenario" value="concerns"> Old account, changed hands</label>
+      <label><input type="radio" name="scenario" value="high"> New "recruiter" account</label>
+      <label><input type="radio" name="scenario" value="low"> Long-standing, lived-in</label>
+    </fieldset>
+    <fieldset><legend>Starting state</legend>
+      <label><input type="radio" name="report" value="none"> Not reported</label>
+      <label><input type="radio" name="report" value="open"> Report form open</label>
+      <label><input type="radio" name="report" value="reported"> Already reported</label>
+    </fieldset>
+    <fieldset><legend>Server</legend>
+      <label><input type="radio" name="net" value="ok"> Reachable</label>
+      <label><input type="radio" name="net" value="offline"> Unreachable</label>
+    </fieldset>
+    <fieldset><legend>Panel width</legend>
+      <label><input type="radio" name="width" value="360"> 360 px</label>
+      <label><input type="radio" name="width" value="420"> 420 px</label>
+      <label><input type="radio" name="width" value="500"> 500 px</label>
+    </fieldset>
+    <div><button id="copy">Copy link</button> <span id="copied" class="copied" role="status"></span>
+      <input id="copyField" readonly hidden aria-label="Link to this configuration"></div>
+  </aside>
+  <div class="frame" id="frame"><div class="p" id="panel"></div></div>
+</div>
+
+<script>
+(() => {
+const SCHEMA = { facts: ['mid', 'top'], look: ['term', 'tiled', 'readout', 'dither', 'mix'], pal: ['system', 'flexoki-light', 'lumon', 'tokyo-night', 'matte-black', 'ink'], view: ['page', 'settings'], scenario: ['concerns', 'high', 'low'], report: ['none', 'open', 'reported'], net: ['ok', 'offline'], width: ['360', '420', '500'] };
+const DEFAULTS = { facts: 'mid', look: 'mix', pal: 'flexoki-light', view: 'page', scenario: 'concerns', report: 'none', net: 'ok', width: '420' };
+function readState() {
+  const q = new URLSearchParams(location.search); const s = { ...DEFAULTS };
+  if (q.get('proto_v') && q.get('proto_v') !== '1') return s;
+  for (const k of Object.keys(SCHEMA)) { const v = q.get('proto_' + k); if (v && SCHEMA[k].includes(v)) s[k] = v; }
+  return s;
+}
+let S = readState();
+const query = () => { const q = new URLSearchParams(); q.set('proto_v', '1'); for (const k of Object.keys(SCHEMA)) q.set('proto_' + k, S[k]); if (typeof DIAL !== 'undefined') { const d = diff(DIAL, defaultsOf(DIAL_CONFIG)); if (Object.keys(d).length) q.set('proto_dial', JSON.stringify(d)); } return q; };
+function writeState() { try { history.replaceState(null, '', location.pathname + '?' + query().toString() + location.hash); } catch {} }
+function shareUrl() { const u = new URL(location.origin + '/aesthetic.html'); u.search = query().toString(); return u.toString(); }
+
+// ---------- synthetic data ----------
+// strength: 'major' | 'minor'. side: 'against' | 'for'. q: which question it answers.
+const Q = {
+  identity: { t: 'Is it who it says it is?', d: 'Verification, name, photo' },
+  hands: { t: 'Has the account changed hands?', d: 'Old accounts are bought for their age' },
+  history: { t: 'Does the history add up?', d: 'Career, join date, network' },
+  lived: { t: 'Does anyone use it?', d: 'Posts, activity, audience' },
+};
+const SCEN = {
+  concerns: {
+    name: 'Sam Q.', initials: 'SQ', headline: 'Senior AI Software Engineer | AI/LLM Applications | Full-Stack | Cloud', meta: 'Texas, United States · joined Aug 2010',
+    level: 'medium', title: 'Some concerns', score: 33,
+    lead: 'Signs this 16-year-old account recently changed hands. One work-email verification, which may belong to a previous owner.',
+    brief: 'This account is <b>16 years old but has never posted</b>. Its <b>banner was replaced three weeks ago</b>, its industry is left over from something else, and the surname is cut to an initial. Together these look like an <b>older account re-dressed for a new persona</b>. In its favor: a <b>work email was verified in 2019</b> and it has 500+ connections, though both can come with a bought account.',
+    signals: [
+      { side: 'against', s: 'major', q: 'hands', t: 'Several signs this account changed hands', why: '4 of the signs below together' },
+      { side: 'against', s: 'minor', q: 'hands', t: 'Banner replaced 3 weeks ago', why: 'On an account that has never posted' },
+      { side: 'against', s: 'minor', q: 'hands', t: 'Industry is "Security & Investigations"', why: "Doesn't fit an AI engineer; can be left over" },
+      { side: 'against', s: 'minor', q: 'identity', t: 'Surname is just an initial' },
+      { side: 'against', s: 'minor', q: 'hands', t: 'Profile URL never customized in 16 years' },
+      { side: 'against', s: 'minor', q: 'lived', t: 'Has never posted' },
+      { side: 'against', s: 'minor', q: 'lived', t: 'Generic phrasing in About', why: '"passionate about"' },
+      { side: 'for', s: 'minor', q: 'identity', t: 'Work email verified at Honeywell, March 2019', why: 'Counted at half: may predate a change of owner' },
+      { side: 'for', s: 'minor', q: 'history', t: '500+ connections' },
+      { side: 'for', s: 'none', q: 'history', t: 'Account is 16 years old', why: "Earns nothing here: age is what's bought" },
+    ],
+    passed: [
+      { q: 'history', t: 'Career length fits the account age' },
+      { q: 'history', t: 'Not a recruiter persona' },
+      { q: 'identity', t: 'Name has letters, not symbols or a brand' },
+      { q: 'lived', t: 'No crypto or "guru" language' },
+    ],
+    missing: ['Profile photo (hidden from your account)'],
+    facts: [['Joined', 'Aug 2010', '16 years'], ['Connections', '500+'], ['Followers', '1,079'], ['Last post', 'Never'], ['Verified', 'Work email', 'Honeywell · 2019'], ['Photo', 'Hidden', 'from you']],
+  },
+  high: {
+    name: 'Olivia Brandt', initials: 'OB', headline: 'Senior Talent Acquisition Partner | Hiring Remote Roles Now', meta: 'Remote · joined Sep 2026',
+    level: 'high', title: 'High suspicion', score: 78,
+    lead: "A two-month-old recruiter account claiming a 12-year career, with almost no network and nothing verified.",
+    brief: 'This is a <b>recruiter persona on a two-month-old account</b> that claims <b>12 years of work history</b>. It has <b>14 connections</b>, no verification and no photo history. That combination is the most common shape of fake recruiter accounts. Nothing on the profile counts in its favor.',
+    signals: [
+      { side: 'against', s: 'major', q: 'history', t: 'Claims 12 years of work on a 2-month-old account' },
+      { side: 'against', s: 'major', q: 'history', t: 'Recruiter persona on an account under a year old' },
+      { side: 'against', s: 'major', q: 'history', t: 'Senior title, almost no network', why: '14 connections' },
+      { side: 'against', s: 'minor', q: 'identity', t: 'No LinkedIn verification' },
+      { side: 'against', s: 'minor', q: 'lived', t: '820 followers on an account that has never posted' },
+      { side: 'against', s: 'minor', q: 'lived', t: 'Has never posted' },
+    ],
+    passed: [
+      { q: 'identity', t: 'Has a profile photo' },
+      { q: 'lived', t: 'No crypto or "guru" language' },
+    ],
+    missing: [],
+    facts: [['Joined', 'Sep 2026', '2 months'], ['Connections', '14'], ['Followers', '820'], ['Last post', 'Never'], ['Verified', 'No'], ['Photo', 'Oct 2026', 'uploaded']],
+  },
+  low: {
+    name: 'Priya Natarajan', initials: 'PN', headline: 'Staff Product Designer at Example Health', meta: 'Chicago, Illinois · joined Mar 2011',
+    level: 'low', title: 'Low suspicion', score: 0,
+    lead: "Nothing major stands out. This can't confirm that the person contacting you owns this profile.",
+    brief: 'A <b>15-year-old account that is clearly used</b>: it posted last week, has a verified identity and a network that fits the career. <b>Nothing stands out.</b> Remember that a genuine profile can still be used by someone pretending to be its owner.',
+    signals: [
+      { side: 'for', s: 'major', q: 'identity', t: 'Identity verified by LinkedIn' },
+      { side: 'for', s: 'minor', q: 'history', t: 'Account is 15 years old' },
+      { side: 'for', s: 'minor', q: 'history', t: '500+ connections' },
+      { side: 'for', s: 'minor', q: 'lived', t: '6,200 followers' },
+    ],
+    passed: [
+      { q: 'lived', t: 'Posted 5 days ago' },
+      { q: 'hands', t: 'No signs the account changed hands' },
+      { q: 'history', t: 'Career length fits the account age' },
+      { q: 'identity', t: 'Has a profile photo' },
+    ],
+    missing: [],
+    facts: [['Joined', 'Mar 2011', '15 years'], ['Connections', '500+'], ['Followers', '6.2K'], ['Last post', '5 days ago', '38 recent'], ['Verified', 'Identity'], ['Photo', 'Jan 2024', 'uploaded']],
+  },
+};
+
+const REASONS = {
+  report: [['fake-recruiter', 'Fake recruiter or job offer'], ['fake-applicant', 'Fake job applicant'], ['copies', 'Copies or pretends to be a real person'], ['money', 'Asked for money, gift cards, crypto or equipment'], ['off-platform', 'Moved to Telegram, WhatsApp or Signal'], ['dont-add-up', "Profile details don't add up"], ['bought', 'Looks bought or taken over'], ['other', 'Other']],
+  vouch: [['know', 'I know them personally'], ['worked', "We've worked together"], ['call', 'Verified them on a video call'], ['other', 'Other']],
+  impersonated: [['contacted', 'Someone using their name or photo contacted me'], ['copy', 'There is a copy of this profile'], ['other', 'Other']],
+};
+const LABEL = Object.fromEntries([...REASONS.report, ...REASONS.vouch, ...REASONS.impersonated]);
+
+
+
+// ---- DialKit: live tuning for look 5. Values also round-trip in the URL as proto_dial. ----
+const DIAL_CONFIG = {
+  spacing: { gap: [32, 8, 40, 1], gutter: [24, 10, 28, 1], rowPad: [12, 2, 14, 1], radius: [4, 0, 10, 1] },
+  type: { heading: [28, 18, 40, 1], body: [14, 12, 15.5, 0.5], factValue: [16, 12, 20, 0.5] },
+  readout: { tag: { type: 'select', options: ['box', 'dither', 'none'], default: 'box' }, size: [56, 36, 96, 2], border: [2, 1, 4, 1] },
+  gauges: { box: { type: 'select', options: ['fill', 'line', 'none'], default: 'fill' }, padding: [16, 0, 24, 1], height: [20, 6, 28, 1], dot: [2, 1, 4, 1], fade: [0.25, 0, 1, 0.05] },
+  wash: { on: true, density: [1, 0, 1, 0.05], reach: [0.3, 0.2, 1, 0.05], opacity: [0.35, 0.1, 1, 0.05] },
+  facts: { style: { type: 'select', options: ['grid', 'lines'], default: 'lines' } },
+  avatar: { size: [56, 28, 72, 2] },
+};
+const defaultsOf = (c) => Object.fromEntries(Object.entries(c).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v && typeof v === 'object' && !('type' in v) ? defaultsOf(v) : v && typeof v === 'object' ? v.default : v]));
+let DIAL = defaultsOf(DIAL_CONFIG);
+const DITHERED = () => S.look === 'dither' || S.look === 'mix';
+function fromUrlDial() {
+  try { const raw = new URLSearchParams(location.search).get('proto_dial'); if (!raw) return null; const v = JSON.parse(raw); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+function deepMerge(a, b) { const o = { ...a }; for (const [k, v] of Object.entries(b || {})) if (k in a) o[k] = v && typeof v === 'object' && !Array.isArray(v) && typeof a[k] === 'object' ? deepMerge(a[k], v) : typeof v === typeof a[k] ? v : a[k]; return o; }
+function diff(cur, def) { const o = {}; for (const k of Object.keys(def)) { if (typeof def[k] === 'object') { const d = diff(cur[k], def[k]); if (Object.keys(d).length) o[k] = d; } else if (cur[k] !== def[k]) o[k] = cur[k]; } return o; }
+function applyDial(root) {
+  const D = DIAL, set = (k, v) => root.style.setProperty(k, v);
+  set('--gap', D.spacing.gap + 'px'); set('--gutter', D.spacing.gutter + 'px'); set('--row-pad', D.spacing.rowPad + 'px'); set('--radius', D.spacing.radius + 'px');
+  set('--h', D.type.heading + 'px'); set('--body', D.type.body + 'px'); set('--fact-v', D.type.factValue + 'px');
+  set('--tag', D.readout.size + 'px'); set('--tag-bw', D.readout.border + 'px');
+  set('--box-pad', D.gauges.padding + 'px'); set('--gauge-h', D.gauges.height + 'px'); set('--av', D.avatar.size + 'px');
+  root.dataset.tag = D.readout.tag; root.dataset.box = D.gauges.box; root.dataset.facts = D.facts.style;
+}
+let kit = null;
+function mountDial() {
+  if (!window.DialKit) return; // CDN blocked: the look still renders with its defaults
+  DialKit.createDialRoot({ position: 'top-right', theme: 'system' });
+  kit = DialKit.createDialKit('Readout × Dither', DIAL_CONFIG);
+  const start = fromUrlDial();
+  if (start) kit.setValues(start);
+  kit.subscribe((v) => {
+    DIAL = deepMerge(defaultsOf(DIAL_CONFIG), v);
+    writeState();
+    if (S.look === 'mix') render();
+  });
+}
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const IC = {
+  gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>',
+  refresh: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 8A5.2 5.2 0 1 1 11.6 4.2M13.2 2.6v3h-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="square"/></svg>',
+};
+const TAG = { high: 'high', medium: 'concerns', low: 'low' };
+const READ = { high: 'HI', medium: 'MED', low: 'LO' };
+
+let R = null, draft = null, flow = 'idle', showNumber = false;
+// Product names for the palettes. Swatch colours mirror the token blocks in the CSS.
+const PALETTES = [
+  { id: 'flexoki-light', name: 'Paper', desc: 'Warm off-white, ink-dark text', omarchy: 'Flexoki Light', bg: '#FFFCF0', text: '#100F0F', text2: '#6F6E69', accent: '#205EA6', flag: '#AF3029', ok: '#66800B' },
+  { id: 'lumon', name: 'Slate', desc: 'Deep blue-grey, pale blue accent', omarchy: 'Lumon', bg: '#16242d', text: '#f2fcff', text2: '#93b6d1', accent: '#8bc9eb', flag: '#ff8f94', ok: '#90dbab' },
+  { id: 'tokyo-night', name: 'Midnight', desc: 'Blue-black, periwinkle accent', omarchy: 'Tokyo Night', bg: '#1a1b26', text: '#c0caf5', text2: '#7c84ad', accent: '#7aa2f7', flag: '#ff7a85', ok: '#8fd9a2' },
+  { id: 'matte-black', name: 'Charcoal', desc: 'Neutral black, amber accent', omarchy: 'Matte Black', bg: '#121212', text: '#e4e4e4', text2: '#8a8a8d', accent: '#e68e0d', flag: '#ff7a72', ok: '#8fd99b' },
+  { id: 'ink', name: 'Ink', desc: 'Near-black, bright blue accent', omarchy: null, bg: '#0f0f10', text: '#ededee', text2: '#8b8b93', accent: '#3d9bff', flag: '#ff6b7d', ok: '#5fe0a0' },
+];
+const sysDark = () => matchMedia('(prefers-color-scheme: dark)').matches;
+const activePal = () => (S.pal === 'system' ? (sysDark() ? 'lumon' : 'flexoki-light') : S.pal);
+function swatch(p) {
+  return `<span class="sw" style="background:${p.bg}"><span class="lines"><i style="background:${p.text};width:70%"></i><i style="background:${p.text2};width:90%"></i><i style="background:${p.text2};width:55%"></i></span><span class="dots"><i style="background:${p.accent}"></i><i style="background:${p.flag}"></i><i style="background:${p.ok}"></i></span></span>`;
+}
+function settingsView() {
+  const paper = PALETTES[0], slate = PALETTES[1];
+  const sys = `<label class="pal"><input type="radio" name="setpal" value="system" ${S.pal === 'system' ? 'checked' : ''}>
+      <span class="sw split" style="--a-bg:${paper.bg};--b-bg:${slate.bg}"><span class="lines"><i style="background:${paper.text};width:70%"></i><i style="background:${paper.text2};width:90%"></i></span><span class="dots"><i style="background:${slate.accent}"></i><i style="background:${paper.flag}"></i><i style="background:${slate.ok}"></i></span></span>
+      <b>Match my system</b><small>Paper by day, Slate at night</small><span class="om">Follows your computer</span></label>`;
+  return `<div class="set">
+    <h2>Settings</h2>
+    <section aria-labelledby="ap"><h3 id="ap">Appearance<span class="rule" aria-hidden="true"></span></h3>
+      <div class="pals" role="radiogroup" aria-labelledby="ap">${sys}${PALETTES.map((p) => `<label class="pal"><input type="radio" name="setpal" value="${p.id}" ${S.pal === p.id ? 'checked' : ''}>${swatch(p)}<b>${p.name}</b><small>${p.desc}</small><span class="om">${p.omarchy ? `Omarchy ${p.omarchy}` : 'After dither-kit'}</span></label>`).join('')}</div>
+    </section>
+    <section aria-labelledby="sv"><h3 id="sv">Save to<span class="rule" aria-hidden="true"></span></h3>
+      <p class="hint">Where Save and Report send what you save. A copy always stays in this browser.</p>
+      <div class="opts" role="radiogroup" aria-labelledby="sv">
+        <label class="opt"><input type="radio" name="dest" value="local"><span>Just me<small>Saves stay in this browser. Nothing is sent anywhere.</small></span></label>
+        <label class="opt"><input type="radio" name="dest" value="community" checked><span>Community<small>Also send saves to the shared database, and see what others have reported.</small></span></label>
+        <label class="opt"><input type="radio" name="dest" value="custom"><span>My own server<small>For a team, or for testing.</small></span></label>
+      </div>
+    </section>
+    <section aria-labelledby="ys"><h3 id="ys">Your saves<span class="rule" aria-hidden="true"></span></h3>
+      <p class="hint">12 saves in this browser, 3 reported.</p>
+      <div class="btn-row2"><button class="btn grow" type="button">Export</button><button class="btn grow" type="button">Import</button></div>
+    </section>
+  </div>`;
+}
+function seedFlow() {
+  R = null; draft = null; flow = 'idle';
+  if (S.report === 'open') { flow = 'form'; draft = { stance: 'report', reasons: [], sure: 'suspected', note: '' }; }
+  if (S.report === 'reported') { R = { stance: 'report', reasons: ['fake-applicant', 'bought'], sure: 'suspected', note: '', at: '2 days ago', sent: true }; flow = 'done'; }
+}
+
+function pane(title, inner, focus = false) {
+  return S.look === 'tiled' ? `<section class="pane${focus ? ' focus' : ''}"><span class="pt">${title}</span>${inner}</section>` : inner;
+}
+function render() {
+  const d = SCEN[S.scenario];
+  const panel = document.getElementById('panel');
+  panel.dataset.look = S.look; panel.dataset.pal = activePal();
+  document.getElementById('frame').style.width = S.width + 'px';
+  const lvlTag = S.look === 'readout' ? READ[d.level] : S.look === 'mix' ? `<span>${READ[d.level]}</span>` : TAG[d.level];
+  const factsHtml = pane('facts', `<dl class="facts">${d.facts.map(([k, v, n]) => `<div><dt>${S.look === 'term' ? k.toLowerCase() : k}</dt><dd>${esc(v)}${n ? `<small>${esc(n)}</small>` : ''}</dd></div>`).join('')}</dl>`);
+  panel.innerHTML = `
+  <header class="top">
+    <div class="bar"><span class="appname">Fake Profile Reporter</span><span class="dest">community</span><span class="sp"></span>
+      <button class="ib" title="Check again" aria-label="Check again">${IC.refresh}</button><button class="ib" id="gearBtn" title="Settings" aria-label="Settings" aria-pressed="${S.view === 'settings'}">${IC.gear}</button></div>
+    <nav class="tabs" role="tablist"><button role="tab" id="pageTab" aria-selected="${S.view === 'page'}">This page</button><button role="tab" aria-selected="false">Saved</button><button role="tab" aria-selected="false">Reports</button></nav>
+  </header>
+  <main class="main">
+    ${S.view === 'settings' ? settingsView() : `
+    ${pane('profile', `<div class="who"><div class="av" aria-hidden="true">${DITHERED() ? `<canvas class="pxav" width="10" height="10" data-seed="${esc(d.name)}"></canvas>` : d.initials}</div><div><h1>${esc(d.name)}</h1><p>${esc(d.headline)}</p><div class="meta">${esc(d.meta)}</div></div></div>`)}
+    ${S.facts === 'top' ? factsHtml : ''}
+    ${pane('assessment', `<section class="lvl ${d.level}" aria-label="${d.title}">${DITHERED() && DIAL.wash.on ? `<canvas class="wash" data-level="${d.level}"></canvas>` : ''}<span class="tag" aria-hidden="true">${lvlTag}</span><h2>${d.title}</h2><p>${esc(d.lead)}</p></section>${S.look === 'tiled' ? '<div style="height:14px"></div>' + bars(d) : ''}`, true)}
+    ${S.look === 'tiled' ? '' : bars(d)}
+    ${S.facts === 'mid' ? factsHtml : ''}
+    ${pane('evidence', lists(d))}
+    ${d.missing.length ? pane('not checked', `<p class="nc"><span class="mk">–</span>${d.missing.map(esc).join('; ')}. Missing evidence adds no suspicion.</p>`) : ''}
+    <p class="foot">Checked just now · a suspicion score, not a verdict · <button id="numBtn">${showNumber ? 'hide' : 'show'} the score</button>${showNumber ? ` · ${d.score}/100, rules v5` : ''}</p>
+    <div class="act${flow === 'form' || flow === 'sending' ? ' open' : ''}" id="act">${actions()}</div>`}
+  </main>`;
+  bind();
+  if (S.look === 'mix') applyDial(panel);
+  if (DITHERED()) paintDither(panel);
+}
+// 4x4 Bayer matrix: a pixel is lit when its threshold is under the local density.
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((v) => (v + 0.5) / 16);
+const lit = (x, y, density) => BAYER[(y % 4) * 4 + (x % 4)] < density;
+function paintDither(root) {
+  const css = getComputedStyle(root);
+  const col = (n) => css.getPropertyValue('--' + n).trim();
+  const px = S.look === 'mix' ? DIAL.gauges.dot : 2; // one dither dot, in CSS px
+  root.querySelectorAll('canvas.dz').forEach((c) => {
+    const W = Math.max(1, Math.round(c.clientWidth / px)), H = Math.max(1, Math.round(c.clientHeight / px));
+    c.width = W; c.height = H;
+    const g = c.getContext('2d'), frac = Number(c.dataset.frac), fill = Math.round(W * frac);
+    for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) {
+      if (x < fill) {
+        // dense at the start, thinning toward the end of the bar, like an area fill
+        const d = 1 - (S.look === 'mix' ? DIAL.gauges.fade : 0.55) * (x / Math.max(1, fill));
+        if (lit(x, y, d)) { g.fillStyle = col(c.dataset.c); g.fillRect(x, y, 1, 1); }
+      } else if (lit(x, y, 0.12)) { g.fillStyle = col('line2'); g.fillRect(x, y, 1, 1); }
+    }
+  });
+  root.querySelectorAll('canvas.wash').forEach((c) => {
+    const W = Math.round(c.clientWidth / px), H = Math.round(c.clientHeight / px);
+    c.width = W; c.height = H;
+    const g = c.getContext('2d'), tone = col({ high: 'flag', medium: 'warn', low: 'ok' }[c.dataset.level]);
+    g.fillStyle = tone; g.globalAlpha = S.look === 'mix' ? DIAL.wash.opacity : 0.5;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      // a wash in the top-right corner, clear of the sentence below the heading
+      const reach = S.look === 'mix' ? DIAL.wash.reach : 0.5, dens = S.look === 'mix' ? DIAL.wash.density : 0.5;
+      const d = dens * Math.max(0, 1 - y / (H * reach)) * Math.max(0, (x / W - (1 - reach)) / reach);
+      if (lit(x, y, d)) g.fillRect(x, y, 1, 1);
+    }
+  });
+  root.querySelectorAll('canvas.pxav').forEach((c) => {
+    // A mirrored 5x5 face from the name: same name, same face.
+    let h = 2166136261; for (const ch of c.dataset.seed) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+    const g = c.getContext('2d'); g.clearRect(0, 0, 10, 10);
+    g.fillStyle = col('raised'); g.fillRect(0, 0, 10, 10);
+    g.fillStyle = col('accent');
+    for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) {
+      if ((h >>> (y * 3 + x)) & 1) { g.fillRect(x * 2, y * 2, 2, 2); g.fillRect((4 - x) * 2, y * 2, 2, 2); }
+    }
+  });
+}
+function weight(l) { return l.reduce((n, x) => n + (x.s === 'major' ? 3 : x.s === 'minor' ? 1 : 0), 0); }
+function bars(d) {
+  const a = d.signals.filter((x) => x.side === 'against'), f = d.signals.filter((x) => x.side === 'for');
+  const max = Math.max(10, weight(a), weight(f));
+  const cnt = (l) => { const m = l.filter((x) => x.s === 'major').length, n = l.filter((x) => x.s === 'minor').length; return [m && `${m} major`, n && `${n} minor`].filter(Boolean).join(' · ') || 'none'; };
+  const meter = (w, c) => DITHERED()
+    ? `<canvas class="dz" data-frac="${w / max}" data-c="${c}"></canvas>`
+    : S.look === 'readout'
+    ? `<span class="segs" aria-hidden="true">${Array.from({ length: max }, (_, i) => `<b class="${i < w ? 'on' : ''}"></b>`).join('')}</span>`
+    : `<span class="track" aria-hidden="true"><i style="width:${(w / max) * 100}%"></i></span>`;
+  const row = (cls, label, l) => S.look === 'readout' || S.look === 'mix'
+    ? `<div class="bal-row ${cls}"><div class="top-l"><span>${label}</span><b>${cnt(l)}</b></div>${meter(weight(l), cls === 'fl' ? 'flag' : 'ok')}</div>`
+    : `<div class="bal-row ${cls}"><span class="lab">${label}</span>${meter(weight(l), cls === 'fl' ? 'flag' : 'ok')}<span class="n">${cnt(l)}</span></div>`;
+  return `<div class="bal" aria-label="Balance of evidence">${row('fl', 'Red flags', a)}${row('fv', "Signs it's genuine", f)}</div>`;
+}
+function lists(d) {
+  const list = (side, title, mk) => {
+    const items = d.signals.filter((x) => x.side === side);
+    if (!items.length) return '';
+    return `<section class="col ${side}"><h3>${S.look === 'term' ? title.toLowerCase() : title}${DITHERED() ? '<span class="rule" aria-hidden="true"></span>' : ''}<small>${items.length}</small></h3><ul>${items.map((x) => `<li class="${x.s}"><span class="mk" aria-hidden="true">${x.s === 'none' ? '·' : mk}</span><span class="t">${esc(x.t)}${x.why ? `<span class="why">${esc(x.why)}</span>` : ''}</span><span class="str">${x.s === 'none' ? '' : x.s}</span></li>`).join('')}</ul></section>`;
+  };
+  return `<div class="cols">${list('against', 'Red flags', '✕')}${list('for', "Signs it's genuine", '✓')}</div>`;
+}
+function actions() {
+  if (flow === 'form' || flow === 'sending') return form();
+  if (flow === 'done' && R) {
+    const reasons = R.reasons.map((x) => LABEL[x]).filter(Boolean).join(', ');
+    return `<div class="done${R.sent ? '' : ' offline'}" role="status">${S.look === 'tiled' ? '<span class="pt" style="position:absolute;top:-9px;left:8px;padding:0 6px;background:var(--deep);font:500 11.5px var(--mono);color:var(--accent)">your report</span>' : ''}
+      <p class="what"><b>${R.stance === 'vouch' ? 'You vouched that this person is real' : R.stance === 'impersonated' ? 'You reported that someone used this identity' : 'You reported this profile as suspicious'}</b>${reasons ? ` · ${esc(reasons)}` : ''}</p>
+      <p class="sub">${R.sent ? `${R.at === 'now' ? 'just now' : esc(R.at)} · shared with community${R.note ? ' · note kept private' : ''}` : "saved in this browser · couldn't reach community, will retry"}</p>
+      <div class="row"><button class="lnk" id="editBtn">Edit</button><button class="lnk quiet" id="withdrawBtn">Withdraw</button></div></div>`;
+  }
+  return `${flow === 'withdrawn' ? '<p class="toast" role="status">Withdrawn. It no longer counts.</p>' : ''}<div class="row"><button class="btn" id="trackBtn">Save</button><button class="btn danger grow" id="reportBtn">Report…</button></div>
+    <p class="alt">Know this person? <button class="lnk" id="vouchBtn">Vouch that they're real</button></p>`;
+}
+function form() {
+  const D = draft, sending = flow === 'sending';
+  const stances = [['report', 'Looks suspicious', 'Fake, scam, or not who it claims'], ['impersonated', "Someone used this person's identity", "Doesn't count against the real owner"], ['vouch', 'I know this person is real', 'Counts in their favor']];
+  const reasons = REASONS[D.stance] ?? [];
+  const canSend = D.stance === 'impersonated' || D.reasons.length > 0;
+  return `<form class="sheet" id="sheet" novalidate>${S.look === 'tiled' ? '<span class="pt" style="position:absolute;top:-9px;left:8px;padding:0 6px;background:var(--deep);font:500 11.5px var(--mono);color:var(--accent)">report</span>' : ''}
+    <h3>${R ? 'Edit your report' : 'Report this profile'}</h3>
+    <fieldset class="seg"><legend class="fl-l">What do you want to say?</legend>
+      ${stances.map(([v, t, s]) => `<label><input type="radio" name="stance" value="${v}" ${D.stance === v ? 'checked' : ''} ${sending ? 'disabled' : ''}><span>${t}<small>${s}</small></span></label>`).join('')}</fieldset>
+    ${reasons.length ? `<fieldset><legend class="fl-l">${D.stance === 'vouch' ? 'How do you know?' : 'What happened?'} <span>pick any</span></legend><div class="chips">${reasons.map(([v, t]) => `<label><input type="checkbox" name="reason" value="${v}" ${D.reasons.includes(v) ? 'checked' : ''} ${sending ? 'disabled' : ''}>${t}</label>`).join('')}</div></fieldset>` : ''}
+    ${D.stance === 'report' ? `<fieldset><legend class="fl-l">How sure are you?</legend><div class="sure"><label><input type="radio" name="sure" value="suspected" ${D.sure === 'suspected' ? 'checked' : ''}>I suspect it</label><label><input type="radio" name="sure" value="confirmed" ${D.sure === 'confirmed' ? 'checked' : ''}>I confirmed it</label></div></fieldset>` : ''}
+    <div><label class="fl-l" for="note">Note <span>optional</span></label><textarea class="note" id="note" maxlength="500" ${sending ? 'disabled' : ''} placeholder="${D.stance === 'vouch' ? 'How you know them' : 'What happened, in your words'}">${esc(D.note)}</textarea>
+      <div class="note-meta"><span>Only stored, never shown to anyone.</span><span class="mono" id="noteCount">${D.note.length}/500</span></div></div>
+    ${!canSend && D.touched ? '<p class="err" role="alert">Pick at least one reason.</p>' : ''}
+    <div class="row"><button type="button" class="btn" id="cancelBtn" ${sending ? 'disabled' : ''}>Cancel</button><button type="submit" class="btn ${D.stance === 'vouch' ? 'primary' : 'danger'} grow" ${sending ? 'disabled' : ''}>${sending ? 'Sending…' : D.stance === 'vouch' ? 'Vouch' : R ? 'Save changes' : 'Send report'}</button></div>
+  </form>`;
+}
+function setPal(v) { S.pal = v; writeState(); syncControls(); render(); }
+function setView(v) { S.view = v; writeState(); syncControls(); render(); }
+function bind() {
+  const $ = (id) => document.getElementById(id);
+  $('gearBtn')?.addEventListener('click', () => setView(S.view === 'settings' ? 'page' : 'settings'));
+  $('pageTab')?.addEventListener('click', () => setView('page'));
+  document.querySelectorAll('input[name="setpal"]').forEach((r) => r.addEventListener('change', () => setPal(r.value)));
+  $('numBtn')?.addEventListener('click', () => { showNumber = !showNumber; render(); });
+  $('reportBtn')?.addEventListener('click', () => { flow = 'form'; draft = { stance: 'report', reasons: [], sure: 'suspected', note: '' }; render(); });
+  $('vouchBtn')?.addEventListener('click', () => { flow = 'form'; draft = { stance: 'vouch', reasons: [], sure: null, note: '' }; render(); });
+  $('trackBtn')?.addEventListener('click', (e) => { e.target.textContent = 'Saved ✓'; e.target.disabled = true; });
+  $('editBtn')?.addEventListener('click', () => { flow = 'form'; draft = { ...R, reasons: [...R.reasons], sure: R.sure ?? 'suspected' }; render(); });
+  $('withdrawBtn')?.addEventListener('click', () => { R = null; flow = 'withdrawn'; render(); });
+  $('cancelBtn')?.addEventListener('click', () => { flow = R ? 'done' : 'idle'; draft = null; render(); });
+  const sheet = $('sheet');
+  if (!sheet) return;
+  sheet.addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.name === 'stance') { draft.stance = t.value; draft.reasons = []; draft.touched = false; render(); }
+    if (t.name === 'reason') draft.reasons = [...sheet.querySelectorAll('input[name=reason]:checked')].map((x) => x.value);
+    if (t.name === 'sure') draft.sure = t.value;
+  });
+  $('note').addEventListener('input', (e) => { draft.note = e.target.value; $('noteCount').textContent = `${draft.note.length}/500`; });
+  sheet.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (!(draft.stance === 'impersonated' || draft.reasons.length)) { draft.touched = true; render(); return; }
+    flow = 'sending'; render();
+    setTimeout(() => { R = { ...draft, at: 'now', sent: S.net === 'ok' }; draft = null; flow = 'done'; render(); }, 700);
+  });
+}
+function syncControls() { for (const k of Object.keys(SCHEMA)) document.querySelectorAll(`input[name="${k}"]`).forEach((r) => (r.checked = r.value === S[k])); }
+document.querySelectorAll('.ctl input[type=radio]').forEach((r) => r.addEventListener('change', () => {
+  S[r.name] = r.value; writeState(); if (r.name === 'report' || r.name === 'scenario') seedFlow(); render();
+}));
+document.getElementById('copy').addEventListener('click', async () => {
+  const url = shareUrl(), msg = document.getElementById('copied'), field = document.getElementById('copyField');
+  try { await navigator.clipboard.writeText(url); msg.textContent = 'Copied'; field.hidden = true; }
+  catch { field.hidden = false; field.value = url; field.select(); msg.textContent = 'Copy this link:'; }
+});
+const tog = document.getElementById('ctlToggle');
+tog.addEventListener('click', () => { const c = document.getElementById('ctl'); c.classList.toggle('closed'); tog.setAttribute('aria-expanded', String(!c.classList.contains('closed'))); });
+if (matchMedia('(max-width: 600px)').matches) { document.getElementById('ctl').classList.add('closed'); tog.setAttribute('aria-expanded', 'false'); }
+DIAL = deepMerge(DIAL, fromUrlDial() || {});
+syncControls(); writeState(); seedFlow(); render(); mountDial();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (S.pal === 'system') render(); });
+})();
+</script>
+</body>
+</html>

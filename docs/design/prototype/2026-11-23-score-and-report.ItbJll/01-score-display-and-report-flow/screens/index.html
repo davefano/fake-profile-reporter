@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototype · score display and report flow</title>
+<style>
+/* ---------- prototype chrome (not product) ---------- */
+:root { color-scheme: light dark; }
+html, body { margin: 0; }
+body.proto { font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; background: #e9e7e2; color: #222; min-height: 100vh; }
+@media (prefers-color-scheme: dark) { body.proto { background: #0b0d10; color: #ddd; } }
+.stage { display: flex; gap: 24px; align-items: flex-start; padding: 20px; }
+.ctl { position: sticky; top: 20px; width: 220px; flex: none; display: grid; gap: 14px; font-size: 12px; }
+.ctl h1 { font-size: 13px; margin: 0; }
+.ctl p.mock { margin: 0; color: #8a5a00; }
+.ctl fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
+.ctl legend { font-weight: 650; margin-bottom: 2px; padding: 0; }
+.ctl label { display: grid; grid-template-columns: 16px 1fr; column-gap: 6px; align-items: baseline; cursor: pointer; }
+.ctl label small { grid-column: 2; }
+.ctl small { display: block; color: #777; }
+.ctl button { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid #999; background: #fff; cursor: pointer; color: #222; }
+.ctl .copied { color: #23793a; }
+.ctl input[readonly] { width: 100%; font: 11px ui-monospace, monospace; }
+.ctl-toggle { display: none; }
+.frame { flex: none; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / .15), 0 8px 30px rgb(0 0 0 / .12); }
+@media (max-width: 600px) {
+  .stage { flex-direction: column; padding: 0; gap: 0; }
+  .ctl { position: static; width: auto; padding: 12px 16px; background: rgb(0 0 0 / .04); }
+  .ctl-toggle { display: block; }
+  .ctl.closed > :not(.ctl-toggle) { display: none; }
+  .frame { width: 100% !important; border-radius: 0; box-shadow: none; }
+}
+
+/* ---------- product: Fake Profile Reporter panel ---------- */
+.p {
+  --bg: #ffffff; --sunken: #f5f4f1; --line: #e7e5e0; --line-strong: #d2cfc8;
+  --text: #16181d; --text-2: #4b4f58; --text-3: #6b6f78;
+  --accent: #2f4bc7; --accent-soft: #edf0fc;
+  --flag: #b4232f; --flag-soft: #fbeceb; --ok: #1f6f3c; --ok-soft: #e8f3ec; --unk: #6b6f78;
+  --warn: #9a5b00;
+  --r-sm: 6px; --r-md: 8px;
+  color-scheme: light;
+  background: var(--bg); color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased; min-height: 760px; position: relative;
+}
+.p.dark {
+  --bg: #121417; --sunken: #1a1d21; --line: #262a30; --line-strong: #353a42;
+  --text: #eceef1; --text-2: #b4b9c2; --text-3: #8d939d;
+  --accent: #9aabff; --accent-soft: #1c2340;
+  --flag: #ff8a8f; --flag-soft: #3a1d20; --ok: #78d69a; --ok-soft: #16301f; --unk: #8d939d; --warn: #f0b35a;
+  color-scheme: dark;
+}
+.p * { box-sizing: border-box; }
+.p :where(h1, h2, h3, p, ul, dl, dd) { margin: 0; padding: 0; }
+.p :where(ul) { list-style: none; }
+.p :where(button) { font: inherit; color: inherit; }
+.p :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* header: a plain title bar, no logo tile, tabs underneath */
+.p-top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line); }
+.p-bar { display: flex; align-items: center; gap: 8px; padding: 10px 16px 0; }
+.p-name { font-weight: 650; font-size: 13px; letter-spacing: -.005em; }
+.p-dest { font-size: 12px; color: var(--text-3); margin-left: 2px; }
+.p-dest::before { content: "· "; }
+.p-bar .sp { flex: 1; }
+.ib { width: 28px; height: 28px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text-3); display: grid; place-items: center; cursor: pointer; }
+.ib:hover { background: var(--sunken); color: var(--text); }
+.ib svg { width: 16px; height: 16px; }
+.p-tabs { display: flex; gap: 16px; padding: 6px 16px 0; }
+.p-tabs button { border: 0; background: none; padding: 6px 0 8px; font-size: 13px; color: var(--text-3); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
+.p-tabs button[aria-selected="true"] { color: var(--text); border-color: var(--text); font-weight: 550; }
+
+.p-main { padding: 16px 16px 120px; }
+
+/* who */
+.who { display: flex; gap: 12px; align-items: center; }
+.av { width: 44px; height: 44px; border-radius: 50%; background: var(--sunken); display: grid; place-items: center; font-weight: 600; color: var(--text-2); flex: none; font-size: 15px; }
+.who h1 { font-size: 16px; font-weight: 650; letter-spacing: -.01em; line-height: 1.25; }
+.who p { font-size: 13px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.who .meta { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+
+/* the level: words first */
+.lvl { margin-top: 18px; }
+.lvl h2 { font-size: 20px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; }
+.lvl h2 .mark { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: 2px; }
+.lvl.high .mark { background: var(--flag); }
+.lvl.medium .mark { background: var(--warn); }
+.lvl.low .mark { background: var(--ok); }
+.lvl p { margin-top: 4px; color: var(--text-2); font-size: 13.5px; max-width: 46ch; text-wrap: pretty; }
+
+/* ---- avenue A: balance ---- */
+.bal { margin-top: 16px; display: grid; gap: 10px; }
+.bal-row { display: grid; grid-template-columns: 9.5em 1fr auto; align-items: center; gap: 10px; font-size: 13px; }
+.bal-row .lab { color: var(--text-2); }
+.bal-row .bar { height: 8px; background: var(--sunken); border-radius: 2px; overflow: hidden; }
+.bal-row .bar i { display: block; height: 100%; border-radius: 2px; }
+.bal-row.f .bar i { background: var(--flag); }
+.bal-row.fav .bar i { background: var(--ok); }
+.bal-row .n { font-variant-numeric: tabular-nums; color: var(--text-3); min-width: 6.5em; text-align: right; font-size: 12px; }
+.cols { margin-top: 18px; display: grid; gap: 18px; }
+.col h3 { font-size: 13px; font-weight: 650; margin-bottom: 6px; display: flex; justify-content: space-between; }
+.col h3 small { font-weight: 400; color: var(--text-3); }
+.col li { padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; display: flex; gap: 10px; }
+.col li:first-child { border-top: 0; }
+.col li .t { flex: 1; text-wrap: pretty; }
+.col li .why { display: block; color: var(--text-3); font-size: 12px; margin-top: 1px; }
+.col li .str { flex: none; font-size: 11px; color: var(--text-3); padding-top: 2px; }
+.col li.major .t { font-weight: 550; }
+.col.against li.major .str { color: var(--flag); }
+
+/* ---- avenue B: brief ---- */
+.brief { margin-top: 14px; padding: 12px 14px; background: var(--sunken); border-radius: var(--r-md); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
+.brief b { font-weight: 600; }
+.qs { margin-top: 18px; display: grid; gap: 16px; }
+.q h3 { font-size: 13px; font-weight: 650; }
+.q > p { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+.q ul { margin-top: 6px; }
+.q li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; padding: 4px 0; font-size: 13px; text-wrap: pretty; }
+.g { width: 16px; height: 16px; display: grid; place-items: center; margin-top: 1px; }
+.g svg { width: 14px; height: 14px; }
+.g.f { color: var(--flag); } .g.ok { color: var(--ok); } .g.u { color: var(--unk); }
+.q li .why { display: block; color: var(--text-3); font-size: 12px; }
+
+/* ---- avenue C: audit ---- */
+.tally { margin-top: 14px; display: flex; gap: 0; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.tally button { flex: 1; border: 0; background: none; padding: 8px 10px; text-align: left; cursor: pointer; border-left: 1px solid var(--line); }
+.tally button:first-child { border-left: 0; }
+.tally button[aria-pressed="true"] { background: var(--sunken); }
+.tally b { display: block; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.tally span { font-size: 12px; color: var(--text-3); }
+.tally .f b { color: var(--flag); } .tally .ok b { color: var(--ok); }
+.audit { margin-top: 12px; }
+.audit h3 { font-size: 12px; color: var(--text-3); font-weight: 600; margin: 14px 0 4px; }
+.audit li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; padding: 5px 0; font-size: 13px; border-top: 1px solid var(--line); }
+.audit li .why { display: block; color: var(--text-3); font-size: 12px; }
+.audit li.ok .t { color: var(--text-2); }
+
+/* shared: facts, not-checked, footer */
+.nc { margin-top: 16px; font-size: 12.5px; color: var(--text-2); }
+.nc b { font-weight: 600; color: var(--text); }
+.facts { margin-top: 18px; padding-block: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+.facts dt { font-size: 12px; color: var(--text-3); }
+.facts dd { font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+.facts dd small { display: block; font-weight: 400; color: var(--text-3); font-size: 12px; }
+.foot { margin-top: 18px; font-size: 12px; color: var(--text-3); }
+.foot button { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+.score-detail { margin-top: 6px; font-size: 12px; color: var(--text-3); }
+
+/* ---- actions and the report flow ---- */
+.act.open { position: static; }
+.act { position: sticky; bottom: 0; z-index: 2; background: var(--bg); border-top: 1px solid var(--line); padding: 12px 16px 14px; margin: 0 -16px; }
+.row { display: flex; gap: 8px; }
+.btn { border-radius: var(--r-sm); padding: 8px 12px; font-weight: 600; font-size: 13px; cursor: pointer; border: 1px solid var(--line-strong); background: var(--bg); }
+.btn:hover:not(:disabled) { background: var(--sunken); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn.grow { flex: 1; }
+.btn.danger { background: var(--flag); border-color: var(--flag); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--flag) 88%, black); }
+.p.dark .btn.danger { color: #1a0b0c; }
+.btn.primary { background: var(--text); border-color: var(--text); color: var(--bg); }
+.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 85%, var(--bg)); }
+.lnk { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-size: 13px; }
+.lnk:hover { text-decoration: underline; text-underline-offset: 2px; }
+.lnk.quiet { color: var(--text-2); }
+.alt { margin-top: 8px; font-size: 12.5px; color: var(--text-3); }
+
+.sheet { display: grid; gap: 14px; }
+.sheet h3 { font-size: 14px; font-weight: 650; }
+.seg { display: grid; gap: 6px; }
+.seg label { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); cursor: pointer; font-size: 13px; }
+.seg label:has(input:checked) { border-color: var(--text); background: var(--sunken); }
+.seg input { margin: 2px 0 0; accent-color: var(--text); }
+.seg small { display: block; color: var(--text-3); font-size: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips label { display: inline-flex; gap: 6px; align-items: center; padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 999px; font-size: 12.5px; cursor: pointer; }
+.chips label:has(input:checked) { border-color: var(--text); background: var(--text); color: var(--bg); }
+.chips input { position: absolute; opacity: 0; pointer-events: none; }
+.chips label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fl { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; display: block; }
+.sure { display: flex; gap: 14px; font-size: 13px; }
+.sure label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.sure input { accent-color: var(--text); }
+textarea.note { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: 13px; color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); border-radius: var(--r-sm); padding: 8px 10px; }
+.note-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.err { color: var(--flag); font-size: 12.5px; }
+.done { display: grid; gap: 4px; }
+.done .what { font-size: 13px; }
+.done .what b { font-weight: 600; }
+.done .sub { font-size: 12px; color: var(--text-3); }
+.done .row { margin-top: 6px; gap: 14px; align-items: center; }
+.done.offline .sub { color: var(--warn); }
+.toast { font-size: 12.5px; color: var(--ok); }
+</style>
+</head>
+<body class="proto">
+<div class="stage">
+  <aside class="ctl" id="ctl" aria-label="Prototype controls">
+    <button class="ctl-toggle" id="ctlToggle" aria-expanded="true">Prototype controls</button>
+    <h1>Prototype controls</h1>
+    <p class="mock">Mock data and a mock server. Nothing is sent anywhere.</p>
+    <fieldset><legend>Score display</legend>
+      <label><input type="radio" name="variant" value="balance"> A · Two sides <small>Weigh red flags against signs it's genuine</small></label>
+      <label><input type="radio" name="variant" value="brief"> B · Reviewer's note <small>Plain summary, then findings by question</small></label>
+      <label><input type="radio" name="variant" value="audit"> C · Checklist <small>Every check, including the ones that passed</small></label>
+    </fieldset>
+    <fieldset><legend>Facts position</legend>
+      <label><input type="radio" name="facts" value="mid"> Under the assessment</label>
+      <label><input type="radio" name="facts" value="top"> Under the profile</label>
+    </fieldset>
+    <fieldset><legend>Profile</legend>
+      <label><input type="radio" name="scenario" value="concerns"> Old account, changed hands</label>
+      <label><input type="radio" name="scenario" value="high"> New "recruiter" account</label>
+      <label><input type="radio" name="scenario" value="low"> Long-standing, lived-in</label>
+    </fieldset>
+    <fieldset><legend>Starting state</legend>
+      <label><input type="radio" name="report" value="none"> Not reported</label>
+      <label><input type="radio" name="report" value="open"> Report form open</label>
+      <label><input type="radio" name="report" value="reported"> Already reported</label>
+      <label><input type="radio" name="report" value="vouched"> Already vouched</label>
+    </fieldset>
+    <fieldset><legend>Server</legend>
+      <label><input type="radio" name="net" value="ok"> Reachable</label>
+      <label><input type="radio" name="net" value="offline"> Unreachable</label>
+    </fieldset>
+    <fieldset><legend>Panel width</legend>
+      <label><input type="radio" name="width" value="360"> 360 px</label>
+      <label><input type="radio" name="width" value="420"> 420 px</label>
+      <label><input type="radio" name="width" value="500"> 500 px</label>
+    </fieldset>
+    <fieldset><legend>Theme</legend>
+      <label><input type="radio" name="theme" value="light"> Light</label>
+      <label><input type="radio" name="theme" value="dark"> Dark</label>
+    </fieldset>
+    <div><button id="copy">Copy link</button> <span id="copied" class="copied" role="status"></span>
+      <input id="copyField" readonly hidden aria-label="Link to this configuration"></div>
+  </aside>
+
+  <div class="frame" id="frame"><div class="p" id="panel"></div></div>
+</div>
+
+<script>
+(() => {
+// ---------- state (URL is the record) ----------
+const SCHEMA = {
+  facts: ['mid', 'top'],
+  variant: ['balance', 'brief', 'audit'],
+  scenario: ['concerns', 'high', 'low'],
+  report: ['none', 'open', 'reported', 'vouched'],
+  net: ['ok', 'offline'],
+  width: ['360', '420', '500'],
+  theme: ['light', 'dark'],
+};
+const DEFAULTS = { facts: 'mid', variant: 'balance', scenario: 'concerns', report: 'none', net: 'ok', width: '420', theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' };
+function readState() {
+  const q = new URLSearchParams(location.search);
+  const s = { ...DEFAULTS };
+  if (q.get('proto_v') && q.get('proto_v') !== '1') return s;
+  for (const k of Object.keys(SCHEMA)) { const v = q.get('proto_' + k); if (v && SCHEMA[k].includes(v)) s[k] = v; }
+  return s;
+}
+let S = readState();
+function writeState() {
+  const q = new URLSearchParams(location.search);
+  q.set('proto_v', '1');
+  for (const k of Object.keys(SCHEMA)) q.set('proto_' + k, S[k]);
+  history.replaceState(null, '', location.pathname + '?' + q.toString() + location.hash);
+}
+function shareUrl() {
+  const u = new URL(location.origin + '/index.html');
+  u.searchParams.set('proto_v', '1');
+  for (const k of Object.keys(SCHEMA)) u.searchParams.set('proto_' + k, S[k]);
+  return u.toString();
+}
+
+// ---------- synthetic data ----------
+// strength: 'major' | 'minor'. side: 'against' | 'for'. q: which question it answers.
+const Q = {
+  identity: { t: 'Is it who it says it is?', d: 'Verification, name, photo' },
+  hands: { t: 'Has the account changed hands?', d: 'Old accounts are bought for their age' },
+  history: { t: 'Does the history add up?', d: 'Career, join date, network' },
+  lived: { t: 'Does anyone use it?', d: 'Posts, activity, audience' },
+};
+const SCEN = {
+  concerns: {
+    name: 'Sam Q.', initials: 'SQ', headline: 'Senior AI Software Engineer | AI/LLM Applications | Full-Stack | Cloud', meta: 'Texas, United States · joined Aug 2010',
+    level: 'medium', title: 'Some concerns', score: 33,
+    lead: 'Signs this 16-year-old account recently changed hands. One work-email verification, which may belong to a previous owner.',
+    brief: 'This account is <b>16 years old but has never posted</b>. Its <b>banner was replaced three weeks ago</b>, its industry is left over from something else, and the surname is cut to an initial. Together these look like an <b>older account re-dressed for a new persona</b>. In its favor: a <b>work email was verified in 2019</b> and it has 500+ connections, though both can come with a bought account.',
+    signals: [
+      { side: 'against', s: 'major', q: 'hands', t: 'Several signs this account changed hands', why: '4 of the signs below together' },
+      { side: 'against', s: 'minor', q: 'hands', t: 'Banner replaced 3 weeks ago', why: 'On an account that has never posted' },
+      { side: 'against', s: 'minor', q: 'hands', t: 'Industry is "Security & Investigations"', why: "Doesn't fit an AI engineer; can be left over" },
+      { side: 'against', s: 'minor', q: 'identity', t: 'Surname is just an initial' },
+      { side: 'against', s: 'minor', q: 'hands', t: 'Profile URL never customized in 16 years' },
+      { side: 'against', s: 'minor', q: 'lived', t: 'Has never posted' },
+      { side: 'against', s: 'minor', q: 'lived', t: 'Generic phrasing in About', why: '"passionate about"' },
+      { side: 'for', s: 'minor', q: 'identity', t: 'Work email verified at Honeywell, March 2019', why: 'Counted at half: may predate a change of owner' },
+      { side: 'for', s: 'minor', q: 'history', t: '500+ connections' },
+      { side: 'for', s: 'none', q: 'history', t: 'Account is 16 years old', why: "Earns nothing here: age is what's bought" },
+    ],
+    passed: [
+      { q: 'history', t: 'Career length fits the account age' },
+      { q: 'history', t: 'Not a recruiter persona' },
+      { q: 'identity', t: 'Name has letters, not symbols or a brand' },
+      { q: 'lived', t: 'No crypto or "guru" language' },
+    ],
+    missing: ['Profile photo (hidden from your account)'],
+    facts: [['Joined', 'Aug 2010', '16 years'], ['Connections', '500+'], ['Followers', '1,079'], ['Last post', 'Never'], ['Verified', 'Work email', 'Honeywell · 2019'], ['Photo', 'Hidden', 'from you']],
+  },
+  high: {
+    name: 'Olivia Brandt', initials: 'OB', headline: 'Senior Talent Acquisition Partner | Hiring Remote Roles Now', meta: 'Remote · joined Sep 2026',
+    level: 'high', title: 'High suspicion', score: 78,
+    lead: "A two-month-old recruiter account claiming a 12-year career, with almost no network and nothing verified.",
+    brief: 'This is a <b>recruiter persona on a two-month-old account</b> that claims <b>12 years of work history</b>. It has <b>14 connections</b>, no verification and no photo history. That combination is the most common shape of fake recruiter accounts. Nothing on the profile counts in its favor.',
+    signals: [
+      { side: 'against', s: 'major', q: 'history', t: 'Claims 12 years of work on a 2-month-old account' },
+      { side: 'against', s: 'major', q: 'history', t: 'Recruiter persona on an account under a year old' },
+      { side: 'against', s: 'major', q: 'history', t: 'Senior title, almost no network', why: '14 connections' },
+      { side: 'against', s: 'minor', q: 'identity', t: 'No LinkedIn verification' },
+      { side: 'against', s: 'minor', q: 'lived', t: '820 followers on an account that has never posted' },
+      { side: 'against', s: 'minor', q: 'lived', t: 'Has never posted' },
+    ],
+    passed: [
+      { q: 'identity', t: 'Has a profile photo' },
+      { q: 'lived', t: 'No crypto or "guru" language' },
+    ],
+    missing: [],
+    facts: [['Joined', 'Sep 2026', '2 months'], ['Connections', '14'], ['Followers', '820'], ['Last post', 'Never'], ['Verified', 'No'], ['Photo', 'Oct 2026', 'uploaded']],
+  },
+  low: {
+    name: 'Priya Natarajan', initials: 'PN', headline: 'Staff Product Designer at Example Health', meta: 'Chicago, Illinois · joined Mar 2011',
+    level: 'low', title: 'Low suspicion', score: 0,
+    lead: "Nothing major stands out. This can't confirm that the person contacting you owns this profile.",
+    brief: 'A <b>15-year-old account that is clearly used</b>: it posted last week, has a verified identity and a network that fits the career. <b>Nothing stands out.</b> Remember that a genuine profile can still be used by someone pretending to be its owner.',
+    signals: [
+      { side: 'for', s: 'major', q: 'identity', t: 'Identity verified by LinkedIn' },
+      { side: 'for', s: 'minor', q: 'history', t: 'Account is 15 years old' },
+      { side: 'for', s: 'minor', q: 'history', t: '500+ connections' },
+      { side: 'for', s: 'minor', q: 'lived', t: '6,200 followers' },
+    ],
+    passed: [
+      { q: 'lived', t: 'Posted 5 days ago' },
+      { q: 'hands', t: 'No signs the account changed hands' },
+      { q: 'history', t: 'Career length fits the account age' },
+      { q: 'identity', t: 'Has a profile photo' },
+    ],
+    missing: [],
+    facts: [['Joined', 'Mar 2011', '15 years'], ['Connections', '500+'], ['Followers', '6.2K'], ['Last post', '5 days ago', '38 recent'], ['Verified', 'Identity'], ['Photo', 'Jan 2024', 'uploaded']],
+  },
+};
+
+const REASONS = {
+  report: [['fake-recruiter', 'Fake recruiter or job offer'], ['fake-applicant', 'Fake job applicant'], ['copies', 'Copies or pretends to be a real person'], ['money', 'Asked for money, gift cards, crypto or equipment'], ['off-platform', 'Moved to Telegram, WhatsApp or Signal'], ['dont-add-up', "Profile details don't add up"], ['bought', 'Looks bought or taken over'], ['other', 'Other']],
+  vouch: [['know', 'I know them personally'], ['worked', "We've worked together"], ['call', 'Verified them on a video call'], ['other', 'Other']],
+  impersonated: [],
+};
+const LABEL = Object.fromEntries([...REASONS.report, ...REASONS.vouch]);
+
+// ---------- icons ----------
+const I = {
+  gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>',
+  refresh: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.2 8A5.2 5.2 0 1 1 11.6 4.2M13.2 2.6v3h-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  f: '<svg viewBox="0 0 16 16" aria-label="Red flag"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  ok: '<svg viewBox="0 0 16 16" aria-label="In their favor"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  pass: '<svg viewBox="0 0 16 16" aria-label="Checked, fine"><circle cx="8" cy="8" r="2.5" fill="currentColor"/></svg>',
+  u: '<svg viewBox="0 0 16 16" aria-label="Not checked"><path d="M4 8h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+};
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// ---------- report flow state (per page load) ----------
+let R = null; // { stance, reasons, sure, note, at, sent }
+let draft = null;
+let flow = 'idle'; // idle | form | sending | done | withdrawn
+let showNumber = false;
+let auditFilter = 'all';
+function seedFlow() {
+  R = null; draft = null; flow = 'idle';
+  if (S.report === 'open') { flow = 'form'; draft = { stance: 'report', reasons: [], sure: 'suspected', note: '' }; }
+  if (S.report === 'reported') { R = { stance: 'report', reasons: ['fake-applicant', 'bought'], sure: 'suspected', note: '', at: '2 days ago', sent: true }; flow = 'done'; }
+  if (S.report === 'vouched') { R = { stance: 'vouch', reasons: ['worked'], sure: null, note: '', at: 'yesterday', sent: true }; flow = 'done'; }
+}
+
+// ---------- render ----------
+function render() {
+  const d = SCEN[S.scenario];
+  const panel = document.getElementById('panel');
+  panel.className = 'p' + (S.theme === 'dark' ? ' dark' : '');
+  document.getElementById('frame').style.width = S.width + 'px';
+  const factsHtml = `<dl class="facts">${d.facts.map(([k, v, n]) => `<div><dt>${k}</dt><dd>${esc(v)}${n ? `<small>${esc(n)}</small>` : ''}</dd></div>`).join('')}</dl>`;
+  panel.innerHTML = `
+  <header class="p-top">
+    <div class="p-bar"><span class="p-name">Fake Profile Reporter</span><span class="p-dest">Community</span><span class="sp"></span>
+      <button class="ib" title="Check again" aria-label="Check again">${I.refresh}</button>
+      <button class="ib" title="Settings" aria-label="Settings">${I.gear}</button></div>
+    <nav class="p-tabs" role="tablist"><button role="tab" aria-selected="true">This page</button><button role="tab" aria-selected="false">Saved</button><button role="tab" aria-selected="false">Reports</button></nav>
+  </header>
+  <main class="p-main" data-variant="${S.variant}">
+    <div class="who"><div class="av" aria-hidden="true">${d.initials}</div><div><h1>${esc(d.name)}</h1><p>${esc(d.headline)}</p><div class="meta">${esc(d.meta)}</div></div></div>
+    ${S.facts === 'top' ? factsHtml : ''}
+    <section class="lvl ${d.level}" aria-label="${d.title}"><h2><span class="mark" aria-hidden="true"></span>${d.title}</h2>${S.variant === 'brief' ? '' : `<p>${esc(d.lead)}</p>`}</section>
+    ${S.variant === 'balance' ? balance(d, S.facts === 'mid' ? factsHtml : '') : S.variant === 'brief' ? (S.facts === 'mid' ? factsHtml : '') + brief(d) : (S.facts === 'mid' ? factsHtml : '') + audit(d)}
+    ${d.missing.length ? `<p class="nc"><b>Not checked:</b> ${d.missing.map(esc).join('; ')}. Missing evidence adds no suspicion.</p>` : ''}
+    <p class="foot">Checked just now · A suspicion score, not a verdict. <button id="numBtn">${showNumber ? 'Hide' : 'Show'} the score</button></p>
+    ${showNumber ? `<p class="score-detail">Score ${d.score} of 100 (rules v5). Low under 30, high from 60. It adds up the flags and subtracts what counts in their favor.</p>` : ''}
+    <div class="act${flow === 'form' || flow === 'sending' ? ' open' : ''}" id="act">${actions(d)}</div>
+  </main>`;
+  bind();
+}
+
+function sideSum(d, side) { return d.signals.filter((x) => x.side === side && x.s !== 'none'); }
+function balance(d, between = '') {
+  const a = sideSum(d, 'against'), f = sideSum(d, 'for');
+  const wt = (l) => l.reduce((n, x) => n + (x.s === 'major' ? 3 : 1), 0);
+  const max = Math.max(6, wt(a), wt(f));
+  const cnt = (l) => { const m = l.filter((x) => x.s === 'major').length, n = l.length - m; return [m && `${m} major`, n && `${n} minor`].filter(Boolean).join(', ') || 'none'; };
+  const list = (side, title) => {
+    const items = d.signals.filter((x) => x.side === side);
+    if (!items.length) return '';
+    return `<section class="col ${side}"><h3>${title}<small>${items.length}</small></h3><ul>${items.map((x) => `<li class="${x.s}"><span class="t">${esc(x.t)}${x.why ? `<span class="why">${esc(x.why)}</span>` : ''}</span><span class="str">${x.s === 'none' ? '' : x.s}</span></li>`).join('')}</ul></section>`;
+  };
+  return `<div class="bal" aria-label="Balance of evidence">
+    <div class="bal-row f"><span class="lab">Red flags</span><span class="bar"><i style="width:${(wt(a) / max) * 100}%"></i></span><span class="n">${cnt(a)}</span></div>
+    <div class="bal-row fav"><span class="lab">Signs it's genuine</span><span class="bar"><i style="width:${(wt(f) / max) * 100}%"></i></span><span class="n">${cnt(f)}</span></div>
+  </div>
+  ${between}
+  <div class="cols">${list('against', 'Red flags')}${list('for', "Signs it's genuine")}</div>`;
+}
+function brief(d) {
+  const groups = Object.entries(Q).map(([k, q]) => {
+    const items = [
+      ...d.signals.filter((x) => x.q === k).map((x) => ({ g: x.side === 'against' ? 'f' : 'ok', t: x.t, why: x.why })),
+      ...d.missing.filter(() => k === 'identity').map((m) => ({ g: 'u', t: m })),
+    ];
+    if (!items.length) return '';
+    return `<section class="q"><h3>${q.t}</h3><p>${q.d}</p><ul>${items.map((x) => `<li><span class="g ${x.g}">${I[x.g]}</span><span>${esc(x.t)}${x.why ? `<span class="why">${esc(x.why)}</span>` : ''}</span></li>`).join('')}</ul></section>`;
+  }).join('');
+  return `<p class="brief">${d.brief}</p><div class="qs">${groups}</div>`;
+}
+function audit(d) {
+  const flags = d.signals.filter((x) => x.side === 'against');
+  const fav = d.signals.filter((x) => x.side === 'for');
+  const passed = d.passed;
+  const rows = [
+    ...flags.map((x) => ({ k: 'f', g: 'f', ...x })),
+    ...fav.map((x) => ({ k: 'ok', g: 'ok', ...x })),
+    ...passed.map((x) => ({ k: 'ok', g: 'pass', cls: 'ok', ...x })),
+    ...d.missing.map((m) => ({ k: 'u', g: 'u', t: m, q: 'identity' })),
+  ];
+  const show = rows.filter((r) => auditFilter === 'all' || r.k === auditFilter);
+  const byQ = Object.entries(Q).map(([k, q]) => {
+    const items = show.filter((r) => r.q === k);
+    if (!items.length) return '';
+    return `<h3>${q.t}</h3><ul>${items.map((r) => `<li class="${r.cls ?? ''}"><span class="g ${r.g === 'pass' ? 'ok' : r.g}">${I[r.g]}</span><span class="t">${esc(r.t)}${r.why ? `<span class="why">${esc(r.why)}</span>` : ''}</span></li>`).join('')}</ul>`;
+  }).join('');
+  const t = (k, n, label) => `<button class="${k}" data-filter="${k}" aria-pressed="${auditFilter === k}"><b>${n}</b><span>${label}</span></button>`;
+  return `<div class="tally" role="group" aria-label="Filter checks">${t('f', flags.length, 'red flags')}${t('ok', fav.length + passed.length, 'fine or in favor')}${t('u', d.missing.length, 'not checked')}</div>
+  <div class="audit">${byQ || '<p class="alt">Nothing in this group.</p>'}</div>
+  ${auditFilter !== 'all' ? '<p class="alt"><button class="lnk" data-filter="all">Show all checks</button></p>' : ''}`;
+}
+
+function stanceWords(r) {
+  if (r.stance === 'vouch') return 'You vouched that this person is real';
+  if (r.stance === 'impersonated') return 'You reported that someone used this person’s identity';
+  return r.sure === 'confirmed' ? 'You reported this profile, confirmed' : 'You reported this profile as suspicious';
+}
+function actions(d) {
+  if (flow === 'form' || flow === 'sending') return form();
+  if ((flow === 'done' || flow === 'withdrawn') && R && flow === 'done') {
+    const reasons = R.reasons.map((x) => LABEL[x]).filter(Boolean).join(', ');
+    const offline = !R.sent;
+    return `<div class="done${offline ? ' offline' : ''}" role="status">
+      <p class="what"><b>${stanceWords(R)}</b>${reasons ? ` · ${esc(reasons)}` : ''}</p>
+      <p class="sub">${offline ? "Saved in this browser. Couldn't reach Community; it will send next time you open the panel." : `${R.at === 'now' ? 'Just now' : esc(R.at)} · shared with Community${R.note ? ' · your note is private' : ''}`}</p>
+      <div class="row"><button class="lnk" id="editBtn">Edit</button><button class="lnk quiet" id="withdrawBtn">Withdraw</button></div>
+    </div>`;
+  }
+  const withdrawn = flow === 'withdrawn' ? '<p class="toast" role="status">Withdrawn. It no longer counts.</p>' : '';
+  return `${withdrawn}<div class="row"><button class="btn" id="trackBtn" title="Save without reporting">Save</button><button class="btn danger grow" id="reportBtn">Report…</button></div>
+    <p class="alt">Know this person? <button class="lnk" id="vouchBtn">Vouch that they're real</button></p>`;
+}
+function form() {
+  const D = draft;
+  const sending = flow === 'sending';
+  const stances = [
+    ['report', 'Looks suspicious', 'Fake, scam, or not who it claims'],
+    ['impersonated', "Someone used this person's identity", "Doesn't count against the real owner"],
+    ['vouch', 'I know this person is real', 'Counts in their favor'],
+  ];
+  const reasons = REASONS[D.stance];
+  const noteHelp = 'Only stored, never shown to anyone.';
+  const canSend = D.stance === 'impersonated' || D.reasons.length > 0;
+  return `<form class="sheet" id="sheet" novalidate>
+    <h3>${R ? 'Edit your report' : 'Report this profile'}</h3>
+    <fieldset class="seg" style="border:0;padding:0;margin:0"><legend class="fl">What do you want to say?</legend>
+      ${stances.map(([v, t, s]) => `<label><input type="radio" name="stance" value="${v}" ${D.stance === v ? 'checked' : ''} ${sending ? 'disabled' : ''}><span>${t}<small>${s}</small></span></label>`).join('')}
+    </fieldset>
+    ${reasons.length ? `<fieldset style="border:0;padding:0;margin:0"><legend class="fl">${D.stance === 'vouch' ? 'How do you know?' : 'What happened?'} <span style="font-weight:400;color:var(--text-3)">Pick any</span></legend>
+      <div class="chips">${reasons.map(([v, t]) => `<label><input type="checkbox" name="reason" value="${v}" ${D.reasons.includes(v) ? 'checked' : ''} ${sending ? 'disabled' : ''}>${t}</label>`).join('')}</div></fieldset>` : ''}
+    ${D.stance === 'report' ? `<fieldset style="border:0;padding:0;margin:0"><legend class="fl">How sure are you?</legend><div class="sure">
+      <label><input type="radio" name="sure" value="suspected" ${D.sure === 'suspected' ? 'checked' : ''}>I suspect it</label>
+      <label><input type="radio" name="sure" value="confirmed" ${D.sure === 'confirmed' ? 'checked' : ''}>I confirmed it</label></div></fieldset>` : ''}
+    <div><label class="fl" for="note">Note <span style="font-weight:400;color:var(--text-3)">optional</span></label>
+      <textarea class="note" id="note" maxlength="500" ${sending ? 'disabled' : ''} placeholder="${D.stance === 'vouch' ? 'How you know them' : 'What happened, in your words'}">${esc(D.note)}</textarea>
+      <div class="note-meta"><span>${noteHelp}</span><span id="noteCount">${D.note.length}/500</span></div></div>
+    ${!canSend && D.touched ? '<p class="err" role="alert">Pick at least one reason.</p>' : ''}
+    <div class="row"><button type="button" class="btn" id="cancelBtn" ${sending ? 'disabled' : ''}>Cancel</button>
+      <button type="submit" class="btn ${D.stance === 'vouch' ? 'primary' : 'danger'} grow" ${sending ? 'disabled' : ''}>${sending ? 'Sending…' : D.stance === 'vouch' ? 'Vouch' : R ? 'Save changes' : 'Send report'}</button></div>
+  </form>`;
+}
+
+// ---------- events ----------
+function bind() {
+  const $ = (id) => document.getElementById(id);
+  $('numBtn')?.addEventListener('click', () => { showNumber = !showNumber; render(); });
+  document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => { auditFilter = auditFilter === b.dataset.filter ? 'all' : b.dataset.filter; render(); }));
+  $('reportBtn')?.addEventListener('click', () => { flow = 'form'; draft = { stance: 'report', reasons: [], sure: 'suspected', note: '' }; render(); $('sheet')?.querySelector('input')?.focus(); });
+  $('vouchBtn')?.addEventListener('click', () => { flow = 'form'; draft = { stance: 'vouch', reasons: [], sure: null, note: '' }; render(); });
+  $('trackBtn')?.addEventListener('click', (e) => { e.target.textContent = 'Saved ✓'; e.target.disabled = true; });
+  $('editBtn')?.addEventListener('click', () => { flow = 'form'; draft = { ...R, reasons: [...R.reasons], sure: R.sure ?? 'suspected' }; render(); });
+  $('withdrawBtn')?.addEventListener('click', () => { R = null; flow = 'withdrawn'; render(); });
+  $('cancelBtn')?.addEventListener('click', () => { flow = R ? 'done' : 'idle'; draft = null; render(); });
+  const sheet = $('sheet');
+  if (sheet) {
+    sheet.addEventListener('change', (e) => {
+      const t = e.target;
+      if (t.name === 'stance') { draft.stance = t.value; draft.reasons = []; draft.touched = false; render(); }
+      if (t.name === 'reason') { draft.reasons = [...sheet.querySelectorAll('input[name=reason]:checked')].map((x) => x.value); }
+      if (t.name === 'sure') draft.sure = t.value;
+    });
+    $('note').addEventListener('input', (e) => { draft.note = e.target.value; $('noteCount').textContent = `${draft.note.length}/500`; });
+    sheet.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const ok = draft.stance === 'impersonated' || draft.reasons.length > 0;
+      if (!ok) { draft.touched = true; render(); return; }
+      flow = 'sending'; render();
+      setTimeout(() => { R = { ...draft, at: 'now', sent: S.net === 'ok' }; draft = null; flow = 'done'; render(); }, 700);
+    });
+  }
+}
+
+// ---------- controls ----------
+function syncControls() {
+  for (const k of Object.keys(SCHEMA)) document.querySelectorAll(`input[name="${k}"]`).forEach((r) => (r.checked = r.value === S[k]));
+}
+document.querySelectorAll('.ctl input[type=radio]').forEach((r) => r.addEventListener('change', () => {
+  S[r.name] = r.value; writeState();
+  if (r.name === 'report' || r.name === 'scenario') seedFlow();
+  render();
+}));
+document.getElementById('copy').addEventListener('click', async () => {
+  const url = shareUrl(); const msg = document.getElementById('copied'); const field = document.getElementById('copyField');
+  try { await navigator.clipboard.writeText(url); msg.textContent = 'Copied'; field.hidden = true; }
+  catch { field.hidden = false; field.value = url; field.select(); msg.textContent = 'Copy this link:'; }
+});
+const tog = document.getElementById('ctlToggle');
+tog.addEventListener('click', () => { const c = document.getElementById('ctl'); c.classList.toggle('closed'); tog.setAttribute('aria-expanded', String(!c.classList.contains('closed'))); });
+if (matchMedia('(max-width: 600px)').matches) { document.getElementById('ctl').classList.add('closed'); tog.setAttribute('aria-expanded', 'false'); }
+
+syncControls(); writeState(); seedFlow(); render();
+})();
+</script>
+</body>
+</html>
