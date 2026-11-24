@@ -59,6 +59,10 @@ accounts.post('/api/snapshots', async (c) => {
   }
   if (!facts.memberId) return c.json({ error: 'no_member_id' }, 422);
   const memberId = facts.memberId;
+  const store = createAccountStore(c.env.DB);
+  // Before any R2 write. The commits below re-check inside their batch, for an approval landing meanwhile.
+  const removed = () => c.json({ error: 'removed' satisfies GoneError }, 410);
+  if (await store.isRemoved(memberId)) return removed();
 
   const limits = await reporterLimits(c, now);
   const day = await limits.daily('snapshots', DAILY_LIMIT);
@@ -66,7 +70,6 @@ accounts.post('/api/snapshots', async (c) => {
   const snapCd = await limits.cooldown(`snapshot:${memberId}`, SNAPSHOT_COOLDOWN_MS);
   if (!snapCd.ok) return c.json({ error: 'captured_recently' }, 429);
 
-  const store = createAccountStore(c.env.DB);
   const finish = async (score: Score, changes: FactChange[]) => {
     await day.commit();
     // The directory's score for the account now.
@@ -98,7 +101,8 @@ accounts.post('/api/snapshots', async (c) => {
   // Merge with the account's current facts and commit, all or nothing, from the
   // version read here. If another upload moved the account first, merge again.
   for (let attempt = 0; attempt < 3; attempt++) {
-    // A concurrent identical upload may have recorded this capture meanwhile.
+    // The member may have been removed meanwhile, or a concurrent identical upload recorded this capture.
+    if (attempt > 0 && (await store.isRemoved(memberId))) return removed();
     if (attempt > 0 && (await store.hasSnapshot(r2Key))) return (await answerStored()) ?? c.json({ error: 'busy' }, 409);
     const prev = await store.current(memberId);
     if (prev && prev.capturedAt > capturedAt) {

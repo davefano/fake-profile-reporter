@@ -13,7 +13,7 @@
 // withdrawing never does.
 
 import { Hono, type Context } from 'hono';
-import { cleanReport, scoreProfile, type ReportKind, type ReportResponse, type StoredScore, type WithdrawResponse } from '@fpr/core';
+import { cleanReport, scoreProfile, type GoneError, type ReportKind, type ReportResponse, type StoredScore, type WithdrawResponse } from '@fpr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { clientIp, hashIp, hashReporter, REPORTER_KEY } from './ip';
@@ -67,6 +67,7 @@ reports.put('/api/reports/:kind/:id', async (c) => {
   }
   const r = cleanReport(kind, body);
   if ('error' in r) return c.json({ error: r.error }, 400);
+  if (kind === 'profile' && (await createAccountStore(c.env.DB).isRemoved(Number(id)))) return c.json({ error: 'removed' satisfies GoneError }, 410);
 
   const now = Date.now();
   const ipHash = await hashIp(clientIp(c.req.raw), c.env.IP_SALT);

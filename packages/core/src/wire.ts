@@ -186,3 +186,69 @@ export interface LeaderboardResponse {
   stats: { reports: number; accounts: number };
   rows: LeaderboardRow[];
 }
+
+/**
+ * POST /api/removals with header x-reporter-key: the person asks for their
+ * own profile to be removed. They placed `code` (6 to 64 of A-Z a-z 0-9 _ -)
+ * in their headline or About first; the maintainer reads the profile to check
+ * it, and nothing changes until they approve. Needs the bot check where the
+ * server has one. Answers 201 RemovalResponse, or RemovalError.
+ */
+export interface RemovalRequest {
+  memberId: number;
+  code: string;
+  /** How to reach the person, at most 200 characters. Cleared once decided. */
+  contact?: string;
+}
+
+export interface RemovalResponse {
+  ok: true;
+}
+
+/**
+ * Error codes from POST /api/removals besides the usual ones
+ * (`verification_required`, `reporter_key_required`, `bad_request`):
+ * 404 `not_found` (the server doesn't hold the profile), 409 `already_pending`
+ * (this key or IP already has a request pending for it), 429 `recently_denied`
+ * (denied on the merits in the last 90 days, or this key's code wasn't found),
+ * 429 `daily_limit_reached`, 503 `queue_full` (too many requests pending).
+ */
+export type RemovalError = 'not_found' | 'already_pending' | 'recently_denied' | 'daily_limit_reached' | 'queue_full';
+
+/** A removal request's state. `approved_r2_pending`: D1 rows deleted, archived snapshots not yet. */
+export type RemovalStatus = 'pending' | 'approved_r2_pending' | 'approved' | 'denied_code' | 'denied_merits' | 'restored';
+
+/**
+ * GET /api/admin/removals (header authorization: Bearer <ADMIN_TOKEN>):
+ * pending requests grouped by member, with what the server itself stores for
+ * that member (never anything the request supplied besides code and contact).
+ */
+export interface AdminRemovalsResponse {
+  members: Array<{
+    memberId: number;
+    /** Slugs this server has seen the member under, newest first. */
+    slugs: string[];
+    /** The member's score now, from its current facts; null if none are stored. */
+    score: StoredScore | null;
+    counts: ReportCounts;
+    requests: Array<{ id: number; code: string; contact: string | null; createdAt: number }>;
+  }>;
+  /** Approved requests whose archived snapshots aren't all deleted yet: approve them again. */
+  unfinished: Array<{ requestId: number; memberId: number }>;
+}
+
+/** POST /api/admin/removals/:id/approve: the member ID of the profile the maintainer read, typed back. */
+export interface AdminApproveRequest {
+  memberId: number;
+}
+
+/** POST /api/admin/removals/:id/deny. `code`: the code wasn't on the profile. `merits`: blocks the profile for 90 days. */
+export interface AdminDenyRequest {
+  reason: 'code' | 'merits';
+}
+
+/** Approve (200, or 202 while `approved_r2_pending`), deny and restore (POST /api/admin/removed/:memberId/restore). */
+export interface AdminDecisionResponse {
+  ok: true;
+  status: RemovalStatus;
+}

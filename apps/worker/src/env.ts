@@ -8,4 +8,6 @@ export interface Env {
   /** Turnstile widget keys. With VERIFY_HOST set, both are required or gated routes answer 503. */
   TURNSTILE_SITEKEY?: string;
   TURNSTILE_SECRET?: string;
+  /** Bearer token for /api/admin/* (removal review), at least 43 characters. Unset or short: those routes answer 404. */
+  ADMIN_TOKEN?: string;
 }

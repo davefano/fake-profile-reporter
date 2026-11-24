@@ -45,10 +45,11 @@ class Statement {
   }
 }
 
-export function createTestD1(): D1Database {
+/** A fresh database built from `schemas` in order (default: schema.sql). */
+export function createTestD1(schemas: string[] = [readFileSync(join(import.meta.dir, '../schema.sql'), 'utf8')]): D1Database {
   const db = new Database(':memory:');
   db.exec('PRAGMA foreign_keys = ON'); // D1 enforces foreign keys
-  db.exec(readFileSync(join(import.meta.dir, '../schema.sql'), 'utf8'));
+  for (const sql of schemas) db.exec(sql);
   return {
     prepare: (sql: string) => new Statement(db, sql),
     // One transaction, results in order, as D1 returns them.
@@ -71,6 +72,17 @@ export function createTestR2(): R2Bucket & { objects: Map<string, { body: Uint8A
     put: async (key: string, body: Uint8Array, options: unknown) => {
       objects.set(key, { body: new Uint8Array(body), options });
       return { key } as unknown as R2Object;
+    },
+    delete: async (keys: string | string[]) => {
+      for (const k of Array.isArray(keys) ? keys : [keys]) objects.delete(k);
+    },
+    // Like R2: keys in order, at most `limit` (default and max 1000) per page, with a cursor while truncated.
+    list: async ({ prefix = '', cursor, limit = 1000 }: R2ListOptions = {}) => {
+      const keys = [...objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+      const start = cursor ? keys.findIndex((k) => k > cursor) : 0;
+      const page = start < 0 ? [] : keys.slice(start, start + Math.min(limit, 1000));
+      const truncated = start >= 0 && start + page.length < keys.length;
+      return { objects: page.map((key) => ({ key })), truncated, ...(truncated ? { cursor: page.at(-1) } : {}), delimitedPrefixes: [] } as unknown as R2Objects;
     },
   } as unknown as R2Bucket & { objects: typeof objects };
 }

@@ -29,3 +29,13 @@ bucket_name = "fpr-snapshots"
 # refused (503), never accepted unchecked.
 # [vars]
 # VERIFY_HOST = "api.example.com"
+
+# Daily retention deletes (src/removals.ts): old removal-request contacts and
+# decided requests, expired bot-check rows, earlier days' counters.
+[triggers]
+crons = ["17 3 * * *"]
+
+# Removal review (/api/admin/*, src/removals.ts) needs ADMIN_TOKEN, a secret of
+# at least 32 random bytes: `openssl rand -base64 32 | wrangler secret put
+# ADMIN_TOKEN`. While it's unset or shorter than 43 characters, admin routes
+# answer 404.

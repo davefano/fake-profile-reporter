@@ -60,18 +60,25 @@ interface SnapshotWrite {
 /** The columns the leaderboard needs, from an account's facts and score. */
 const listing = (f: ProfileFacts, s: Score) => [f.slug, f.firstName, f.lastName, f.headline, s.score, s.level, s.version];
 
+/** True while the member hasn't been removed at its owner's request (removals.ts). */
+const NOT_REMOVED = 'NOT EXISTS (SELECT 1 FROM removed_members WHERE member_id = ?)';
+
 /**
- * The condition every write after a compare-and-swap carries: true only if
- * this upload's rev is the stored one, so a lost swap writes nothing.
+ * The condition every snapshot write carries, checked inside its batch: the
+ * member isn't removed, so an upload already in flight when a removal is
+ * approved writes nothing; and, after a compare-and-swap, this upload's rev
+ * is the stored one, so a lost swap writes nothing.
  */
-const revGuard = (memberId: number, rev: string | null) =>
-  rev ? { sql: 'EXISTS (SELECT 1 FROM account_current WHERE member_id = ? AND rev = ?)', params: [memberId, rev] } : { sql: '1', params: [] };
+const writeGuard = (memberId: number, rev: string | null) =>
+  rev
+    ? { sql: `${NOT_REMOVED} AND EXISTS (SELECT 1 FROM account_current WHERE member_id = ? AND rev = ?)`, params: [memberId, memberId, rev] }
+    : { sql: NOT_REMOVED, params: [memberId] };
 
 export function createAccountStore(db: D1Database) {
-  /** Statements recording one snapshot; with `rev`, each runs only if that rev is current. */
+  /** Statements recording one snapshot, each only if the member isn't removed and, with `rev`, that rev is current. */
   const snapshotStatements = (s: SnapshotWrite, rev: string | null) => {
     const memberId = s.observed.memberId;
-    const { sql: guard, params: g } = revGuard(memberId, rev);
+    const { sql: guard, params: g } = writeGuard(memberId, rev);
     return [
       db
         .prepare(
@@ -105,6 +112,11 @@ export function createAccountStore(db: D1Database) {
       return facts ? { facts, capturedAt: row!.captured_at, rev: row!.rev } : null;
     },
 
+    /** Whether the member was removed at its owner's request: its saves and reports are refused. */
+    async isRemoved(memberId: number): Promise<boolean> {
+      return !!(await db.prepare(`SELECT 1 AS x FROM removed_members WHERE member_id = ?`).bind(memberId).first());
+    },
+
     /** Whether this archived capture is already on record (keys are content hashes). */
     async hasSnapshot(r2Key: string): Promise<boolean> {
       return !!(await db.prepare(`SELECT 1 AS x FROM account_snapshots WHERE r2_key = ?`).bind(r2Key).first());
@@ -119,25 +131,25 @@ export function createAccountStore(db: D1Database) {
     async commitNewest(s: SnapshotWrite, prevRev: string | null, account: { facts: ProfileFacts; score: Score }): Promise<boolean> {
       const memberId = s.observed.memberId;
       const rev = crypto.randomUUID();
-      const guard = revGuard(memberId, rev);
+      const guard = writeGuard(memberId, rev);
       const results = await db.batch([
         // A first capture creates the account row in the same transaction (the
         // facts reference it). Of two first uploads, whichever batch runs first
-        // creates both rows; the other's inserts are no-ops.
+        // creates both rows; the other's inserts are no-ops. A removed member gets neither.
         db
           .prepare(
             `INSERT OR IGNORE INTO accounts (member_id, slug, first_name, last_name, headline, score, level, score_version,
                first_captured_at, last_captured_at, snapshot_count)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0 WHERE ${NOT_REMOVED}`,
           )
-          .bind(memberId, ...listing(account.facts, account.score), s.capturedAt, s.capturedAt),
+          .bind(memberId, ...listing(account.facts, account.score), s.capturedAt, s.capturedAt, memberId),
         prevRev == null
           ? db
-              .prepare(`INSERT INTO account_current (member_id, rev, captured_at, facts_json) VALUES (?, ?, ?, ?) ON CONFLICT(member_id) DO NOTHING`)
-              .bind(memberId, rev, s.capturedAt, JSON.stringify(account.facts))
+              .prepare(`INSERT INTO account_current (member_id, rev, captured_at, facts_json) SELECT ?, ?, ?, ? WHERE ${NOT_REMOVED} ON CONFLICT(member_id) DO NOTHING`)
+              .bind(memberId, rev, s.capturedAt, JSON.stringify(account.facts), memberId)
           : db
-              .prepare(`UPDATE account_current SET rev = ?, captured_at = ?, facts_json = ? WHERE member_id = ? AND rev = ?`)
-              .bind(rev, s.capturedAt, JSON.stringify(account.facts), memberId, prevRev),
+              .prepare(`UPDATE account_current SET rev = ?, captured_at = ?, facts_json = ? WHERE member_id = ? AND rev = ? AND ${NOT_REMOVED}`)
+              .bind(rev, s.capturedAt, JSON.stringify(account.facts), memberId, prevRev, memberId),
         db
           .prepare(
             `UPDATE accounts SET slug = ?, first_name = ?, last_name = ?, headline = ?, score = ?, level = ?, score_version = ?,
@@ -156,9 +168,9 @@ export function createAccountStore(db: D1Database) {
         db
           .prepare(
             `UPDATE accounts SET first_captured_at = MIN(first_captured_at, ?), last_captured_at = MAX(last_captured_at, ?),
-               snapshot_count = snapshot_count + 1 WHERE member_id = ?`,
+               snapshot_count = snapshot_count + 1 WHERE member_id = ? AND ${NOT_REMOVED}`,
           )
-          .bind(s.capturedAt, s.capturedAt, s.observed.memberId),
+          .bind(s.capturedAt, s.capturedAt, s.observed.memberId, s.observed.memberId),
         ...snapshotStatements(s, null),
       ]);
     },
@@ -206,8 +218,9 @@ export function createAccountStore(db: D1Database) {
 
     async getAccount(memberId: number): Promise<AccountResponse | null> {
       // One batch is one transaction: every part of the answer comes from the same moment.
+      // A removed member reads as not found.
       const [accountRows, currentRows, slugRows, snapshotRows, reportRows] = await db.batch([
-        db.prepare(`SELECT * FROM accounts WHERE member_id = ?`).bind(memberId),
+        db.prepare(`SELECT * FROM accounts WHERE member_id = ? AND ${NOT_REMOVED}`).bind(memberId, memberId),
         db.prepare(`SELECT facts_json FROM account_current WHERE member_id = ?`).bind(memberId),
         db.prepare(`SELECT slug, first_seen, last_seen FROM account_slugs WHERE member_id = ? ORDER BY first_seen`).bind(memberId),
         db.prepare(`SELECT id, captured_at, score, changes_json FROM account_snapshots WHERE member_id = ? ORDER BY captured_at DESC, id DESC LIMIT 50`).bind(memberId),
@@ -249,7 +262,10 @@ export function createAccountStore(db: D1Database) {
     },
 
     async memberIdForSlug(slug: string): Promise<number | null> {
-      const row = await db.prepare(`SELECT member_id FROM account_slugs WHERE slug = ? ORDER BY last_seen DESC LIMIT 1`).bind(slug.toLowerCase()).first<{ member_id: number }>();
+      const row = await db
+        .prepare(`SELECT member_id FROM account_slugs s WHERE slug = ? AND NOT EXISTS (SELECT 1 FROM removed_members r WHERE r.member_id = s.member_id) ORDER BY last_seen DESC LIMIT 1`)
+        .bind(slug.toLowerCase())
+        .first<{ member_id: number }>();
       return row?.member_id ?? null;
     },
   };
