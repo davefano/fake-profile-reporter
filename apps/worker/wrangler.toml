@@ -19,3 +19,13 @@ bucket_name = "fpr-snapshots"
 
 # IP_SALT (salt for anonymous IP hashing) is a secret: `wrangler secret put
 # IP_SALT` in production, and .dev.vars locally (copy .dev.vars.example).
+
+# Bot check (Cloudflare Turnstile, src/verify.ts). Off while VERIFY_HOST is
+# unset: no /verify page and no check, which suits forks and your own server.
+# To turn it on, set VERIFY_HOST to the host that serves this worker (e.g.
+# api.example.com) under [vars], and put the widget's keys as secrets:
+# `wrangler secret put TURNSTILE_SITEKEY` and `wrangler secret put
+# TURNSTILE_SECRET`. With VERIFY_HOST set and a key missing, reports are
+# refused (503), never accepted unchecked.
+# [vars]
+# VERIFY_HOST = "api.example.com"

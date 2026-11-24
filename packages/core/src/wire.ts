@@ -71,6 +71,51 @@ export interface ReportResponse {
   counts: ReportCounts;
 }
 
+/**
+ * HTTP 403 from a gated route (PUT /api/reports, removal requests) when this
+ * reporter key hasn't passed the bot check on this server. Frame `verifyUrl`
+ * with `&parentOrigin=<extension origin>` added (or open it with `&mode=tab`),
+ * then send the token to POST /api/verify and retry. Other codes: 403
+ * `verify_failed` from POST /api/verify, 503 `verify_unconfigured` when the
+ * server is set up for the check but missing a key.
+ */
+export interface VerificationRequired {
+  error: 'verification_required';
+  /** https://<verify host>/verify?challenge=<id>. Carries no key material. */
+  verifyUrl: string;
+}
+
+/**
+ * Posted by the /verify page to `parentOrigin` (never `*`) once the widget
+ * passes. Accept it only from the framed page's origin and iframe.
+ */
+export interface VerifyMessage {
+  type: 'fpr-verify';
+  challenge: string;
+  token: string;
+}
+
+/**
+ * POST /api/verify, JSON only. With header x-reporter-key, the challenge must
+ * have been issued to that key. Without it (tab mode), the challenge's own
+ * reporter is verified.
+ */
+export interface VerifyRequest {
+  token: string;
+  challenge: string;
+}
+
+export interface VerifyResponse {
+  ok: true;
+  verifiedUntil: number;
+}
+
+/** GET /api/verify/status with header x-reporter-key (tab mode polls it). */
+export interface VerifyStatusResponse {
+  verified: boolean;
+  verifiedUntil: number | null;
+}
+
 /** DELETE /api/reports/:kind/:id: withdrawn, and the target's counts now. */
 export interface WithdrawResponse {
   ok: true;

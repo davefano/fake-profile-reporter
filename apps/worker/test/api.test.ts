@@ -26,7 +26,12 @@ test('unknown routes 404, and only the extension gets CORS', async () => {
   }
 });
 
-test('there is no public web page, only the API', async () => {
+test('there is no public web page besides /verify, only the API', async () => {
   expect((await app.request('/', {}, env)).status).toBe(404);
   expect((await app.request('/leaderboard', {}, env)).status).toBe(404);
+  // The one exception: the bot-check page, served only when VERIFY_HOST is set.
+  const verifyEnv = { ...env, VERIFY_HOST: 'api.example.test', TURNSTILE_SITEKEY: 'k', TURNSTILE_SECRET: 's' };
+  expect((await app.request(`/verify?challenge=${'0'.repeat(32)}&mode=tab`, {}, verifyEnv)).status).toBe(200);
+  expect((await app.request('/', {}, verifyEnv)).status).toBe(404);
+  expect((await app.request('/leaderboard', {}, verifyEnv)).status).toBe(404);
 });

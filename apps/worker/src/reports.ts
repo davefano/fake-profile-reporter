@@ -9,6 +9,8 @@
 // report. The target must already be saved (POST /api/snapshots or
 // /api/entities), and the report stores the target's score at that moment.
 // Notes are stored for building heuristics and never returned.
+// Reporting needs the bot check where the server has one (verify.ts);
+// withdrawing never does.
 
 import { Hono, type Context } from 'hono';
 import { cleanReport, scoreProfile, type ReportKind, type ReportResponse, type StoredScore, type WithdrawResponse } from '@fpr/core';
@@ -18,6 +20,7 @@ import { clientIp, hashIp, hashReporter, REPORTER_KEY } from './ip';
 import { safeJson } from './json';
 import { countDaily } from './limits';
 import { countsFrom, reportCounts } from './reports-store';
+import { requireVerified } from './verify';
 
 const MAX_BODY = 8 * 1024;
 // Reports and edits per UTC day. Withdrawals don't count.
@@ -76,6 +79,8 @@ reports.put('/api/reports/:kind/:id', async (c) => {
     now,
   );
   if (!within) return c.json({ error: 'daily_limit_reached' }, 429);
+  const gate = await requireVerified(c, reporter, now);
+  if (gate) return gate;
 
   const score = await targetScore(c.env, kind, id);
   if (!score) return c.json({ error: 'not_saved' }, 404);
