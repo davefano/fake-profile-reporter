@@ -143,6 +143,13 @@ function bindResult() {
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
     img.addEventListener('error', () => img.remove(), { once: true }),
   );
+  const scoreBtn = $('scoreBtn');
+  scoreBtn.addEventListener('click', () => {
+    const open = scoreBtn.getAttribute('aria-expanded') !== 'true';
+    scoreBtn.setAttribute('aria-expanded', String(open));
+    scoreBtn.textContent = open ? 'Hide the score' : 'Show the score';
+    $('scoreDetail').hidden = !open;
+  });
 }
 
 /** Save without saying anything about it. */

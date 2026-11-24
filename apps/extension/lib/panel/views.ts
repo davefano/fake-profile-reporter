@@ -1,8 +1,11 @@
-// HTML for a scan result. Pure functions of the scan; all text is escaped.
+// HTML for a scan result, in layout A: identity, the assessment, the balance
+// of evidence, facts, the two lists, what wasn't checked, the kept pieces and
+// the footer. Pure functions of the scan; all text is escaped. Canvases are
+// drawn afterwards by dither.ts.
 
 import { reportMarkup } from './report-form';
 import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
-import type { RiskLevel, Score, Signal } from '@fpr/core/scam';
+import { levelFor, type RiskLevel, type Score, type Signal } from '@fpr/core/scam';
 import type { CompanyScan, JobScan, ProfileScan, ScanResult } from '@/lib/scan/messages';
 import { ago, ageText, compact, esc, monthDay, monthYear } from './format';
 
@@ -12,35 +15,145 @@ const CHECK = `<svg viewBox="0 0 16 16" aria-label="Work email verified"><path d
 export function renderResult(r: ScanResult): string {
   const body = r.kind === 'company' ? renderCompany(r) : r.kind === 'job' ? renderJob(r) : renderProfile(r);
   return `${body}
-  <p class="foot"><span>Checked ${r.cached ? ago(r.capturedAt) : 'just now'}${r.cached ? ' (cached)' : ''}</span><span>Score v${r.score.version}. A suspicion score, not a verdict.</span></p>
+  ${footer(r)}
   ${actions(r)}`;
 }
 
 const NOUN = { profile: 'profile', company: 'company page', job: 'job posting' } as const;
 
 const TITLE: Record<RiskLevel, string> = { high: 'High suspicion', medium: 'Some concerns', low: 'Low suspicion' };
+const TAG: Record<RiskLevel, string> = { high: 'HI', medium: 'MED', low: 'LO' };
+const LEVEL: Record<RiskLevel, string> = { high: 'High', medium: 'Medium', low: 'Low' };
+const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
 
-function verdictText(level: RiskLevel, kind: ScanResult['kind']): string {
-  if (level === 'high') return `Several things on this ${NOUN[kind]} don't add up. Verify it before you share anything or move forward.`;
-  if (level === 'medium') return `A few things are worth checking. Plenty of real ${NOUN[kind]}s look like this too.`;
-  // A real profile can still be used by someone else (impersonation).
-  return kind === 'profile'
-    ? "Nothing major stands out. This can't confirm that the person contacting you owns this profile."
-    : 'Nothing major stands out.';
+// --- signals ---------------------------------------------------------------------
+type Strength = 'major' | 'minor' | 'none';
+
+/** Stored scores before rules v6 have no strength: |weight| ≥ 12 reads as major. A zero weight earns nothing. */
+function strengthOf(x: Signal): Strength {
+  if (x.strength) return x.strength;
+  if (x.weight === 0) return 'none';
+  return Math.abs(x.weight) >= 12 ? 'major' : 'minor';
 }
 
-function scoreBlock(s: Score, kind: ScanResult['kind']) {
-  const v = { title: TITLE[s.level], text: verdictText(s.level, kind) };
-  return `<section class="score level-${s.level}" aria-label="Suspicion score ${s.score} out of 100, ${v.title}">
-    <div class="score-head">
-      <div class="score-num"><strong>${s.score}</strong><span>/100</span></div>
-      <div class="verdict">
-        <h2>${v.title}</h2>
-        <p>${v.text}</p>
-      </div>
+const GAUGE: Record<Strength, number> = { major: 3, minor: 1, none: 0 };
+const byStrength = (a: Signal, b: Signal) => GAUGE[strengthOf(b)] - GAUGE[strengthOf(a)] || Math.abs(b.weight) - Math.abs(a.weight);
+
+function sides(s: Score) {
+  return {
+    against: s.signals.filter((x) => x.kind !== 'trust').sort(byStrength),
+    favor: s.signals.filter((x) => x.kind === 'trust').sort(byStrength),
+  };
+}
+
+/** The signal whose floor lifted the level above what the number alone gives, if any. */
+function raisedBy(s: Score): Signal | null {
+  if (RANK[s.level] <= RANK[levelFor(s.score)]) return null;
+  return s.signals.find((x) => x.floor === s.level) ?? null;
+}
+
+/** Names for patterns, in suspicion wording, used where the lead and the score detail mention them. */
+const PATTERN: Record<string, { lead: string; name: string }> = {
+  'pattern.aged-resale': { lead: 'Several details look like an old account re-dressed for a new persona.', name: 'changed-hands pattern' },
+  'pattern.career-vs-age': { lead: 'The career it claims is longer than the account has existed.', name: 'career-vs-account-age pattern' },
+  'pattern.recruiter-new': { lead: 'A recruiter persona on a new account, a shape often seen in job scams.', name: 'new-recruiter pattern' },
+  'pattern.senior-no-network': { lead: 'A senior title with almost no network.', name: 'senior-title-no-network pattern' },
+};
+
+const sentence = (label: string) => (/[.!?]$/.test(label) ? label : `${label}.`);
+
+/** One or two sentences from the strongest red flags; a floor's pattern comes first. */
+function lead(s: Score, kind: ScanResult['kind']) {
+  const raised = raisedBy(s);
+  const top = [raised, ...sides(s).against.filter((x) => x !== raised && strengthOf(x) !== 'none')].filter(Boolean).slice(0, 2) as Signal[];
+  const parts = top.map((x) => PATTERN[x.id]?.lead ?? sentence(x.label));
+  if (!parts.length) parts.push('Nothing major stands out.');
+  // A genuine profile can still be used by someone else (impersonation).
+  if (kind === 'profile' && s.level === 'low') parts.push("This can't confirm that the person contacting you owns this profile.");
+  return parts.join(' ');
+}
+
+// --- blocks ----------------------------------------------------------------------
+function identity(seed: string, photoUrl: string | null, title: string, headline: string | null, meta: string[]) {
+  return `<article class="hero">
+    ${face(photoUrl, seed)}
+    <div class="who">
+      <h1 class="name">${esc(title)}</h1>
+      ${headline ? `<p class="headline">${esc(headline)}</p>` : ''}
+      ${meta.length ? `<p class="meta">${meta.join('')}</p>` : ''}
     </div>
-    ${meter(s.score)}
+  </article>`;
+}
+
+/** The real photo when there is one, over a pixel avatar that shows if it's missing or fails to load. */
+function face(photoUrl: string | null, seed: string) {
+  const url = photoUrl && /^https:\/\//.test(photoUrl) ? photoUrl : null;
+  return `<div class="avatar" aria-hidden="true"><canvas class="pxav" data-seed="${esc(seed)}"></canvas>${url ? `<img src="${esc(url)}" alt="" referrerpolicy="no-referrer">` : ''}</div>`;
+}
+
+function assessment(s: Score, kind: ScanResult['kind']) {
+  return `<section class="lvl level-${s.level}">
+    <canvas class="wash" data-level="${s.level}" aria-hidden="true"></canvas>
+    <span class="tag" aria-hidden="true">${TAG[s.level]}</span>
+    <h2>${TITLE[s.level]}</h2>
+    <p>${esc(lead(s, kind))}</p>
   </section>`;
+}
+
+function strengthCount(list: Signal[], sep: string) {
+  const n = (k: Strength) => list.filter((x) => strengthOf(x) === k).length;
+  return [n('major') && `${n('major')} major`, n('minor') && `${n('minor')} minor`].filter(Boolean).join(sep);
+}
+
+/** Two dithered gauges: major signs weigh 3, minor 1, on a shared scale of at least 10. */
+function balance(s: Score) {
+  const { against, favor } = sides(s);
+  const weight = (l: Signal[]) => l.reduce((n, x) => n + GAUGE[strengthOf(x)], 0);
+  const max = Math.max(10, weight(against), weight(favor));
+  const row = (cls: string, tone: string, label: string, list: Signal[]) => {
+    const frac = Math.round((weight(list) / max) * 1000) / 1000;
+    return `<div class="bal-row ${cls}">
+      <div class="top-l" aria-hidden="true"><span>${esc(label)}</span><b>${strengthCount(list, ' · ') || '0'}</b></div>
+      <canvas class="dz" data-frac="${frac}" data-c="${tone}" role="img" aria-label="${esc(`${label}: ${strengthCount(list, ', ') || 'none'}`)}"></canvas>
+    </div>`;
+  };
+  return `<div class="bal">${row('fl', 'flag', 'Red flags', against)}${row('fv', 'ok', "Signs it's genuine", favor)}</div>`;
+}
+
+function signalItem(x: Signal, mark: string) {
+  const st = strengthOf(x);
+  return `<li class="${st}"><span class="mk" aria-hidden="true">${st === 'none' ? '·' : mark}</span><span class="t">${esc(x.label)}${x.detail ? `<span class="why">${esc(x.detail)}</span>` : ''}</span><span class="str">${st === 'none' ? '' : st}</span></li>`;
+}
+
+function heading(title: string, count?: number | string) {
+  return `<h3>${esc(title)}<span class="rule" aria-hidden="true"></span><small>${count ?? ''}</small></h3>`;
+}
+
+function lists(s: Score) {
+  const { against, favor } = sides(s);
+  const list = (cls: string, title: string, mark: string, items: Signal[]) =>
+    `<section class="col ${cls}">${heading(title, items.length)}${
+      items.length ? `<ul>${items.map((x) => signalItem(x, mark)).join('')}</ul>` : '<p class="none">Nothing found on this side</p>'
+    }</section>`;
+  return `${list('against', 'Red flags', '✕', against)}${list('for', "Signs it's genuine", '✓', favor)}`;
+}
+
+function notChecked(s: Score) {
+  if (!s.missing.length) return '';
+  return `<p class="nc"><span class="mk" aria-hidden="true">–</span>Not checked: ${esc(s.missing.join('; '))}. Missing evidence adds no suspicion.</p>`;
+}
+
+function footer(r: ScanResult) {
+  const s = r.score;
+  const raised = raisedBy(s);
+  const why = raised
+    ? ` The ${esc(PATTERN[raised.id]?.name ?? `“${raised.label}” pattern`)} raised the level to ${LEVEL[s.level]}; the number alone gives ${LEVEL[levelFor(s.score)]}.`
+    : '';
+  return `<p class="foot">
+    <span>Checked ${r.cached ? `${ago(r.capturedAt)} (cached)` : 'just now'} · a suspicion score, not a verdict</span>
+    <button type="button" class="lnk" id="scoreBtn" aria-expanded="false" aria-controls="scoreDetail">Show the score</button>
+    <span id="scoreDetail" hidden>${s.score}/100, rules v${s.version}.${why}</span>
+  </p>`;
 }
 
 const PART_LABEL: Record<ProfilePart, string> = {
@@ -63,15 +176,7 @@ function readNotes(r: ScanResult) {
   const shown = new Set(r.kind === 'profile' ? (r.carried ?? []) : []);
   const errors = Object.entries(r.errors ?? {}).filter(([k]) => !shown.has(carriedFrom[k]!));
   if (errors.length) notes.push(`Failed to load: ${errors.map(([k, v]) => `${k} (${v})`).join('; ')}`);
-  return notes.length ? `<section class="group missing"><h3>About this read</h3><ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : '';
-}
-
-function signalsBlock(s: Score) {
-  const groups = groupSignals(s.signals);
-  return `${groups.discrepancy.length ? signalGroup("Doesn't add up", 'discrepancy', groups.discrepancy) : ''}
-  ${groups.weak.length ? signalGroup('Weak signals', 'weak', groups.weak) : ''}
-  ${groups.trust.length ? signalGroup('In their favor', 'trust', groups.trust) : ''}
-  ${s.missing.length ? `<section class="group missing"><h3>Not checked</h3><ul>${s.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul></section>` : ''}`;
+  return notes.length ? `<section class="sec notes">${heading('About this read')}<ul>${notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></section>` : '';
 }
 
 function actions(r: ScanResult) {
@@ -86,38 +191,45 @@ function actions(r: ScanResult) {
   </div>`;
 }
 
+/** Everything from the assessment to the kept pieces, shared by the three kinds. */
+function body(r: ScanResult, factsHtml: string, kept: string) {
+  return `${assessment(r.score, r.kind)}
+  ${balance(r.score)}
+  ${factsHtml}
+  ${lists(r.score)}
+  ${notChecked(r.score)}
+  ${readNotes(r)}
+  ${r.changes.length ? renderChanges(r.kind, r.changes, r.previousCheckAt) : ''}
+  ${kept}`;
+}
+
+const metaSpan = (text: string) => `<span>${esc(text)}</span>`;
+
 function renderProfile(r: ProfileScan): string {
   const f = r.facts;
   const name = [f.firstName, f.lastName].filter(Boolean).join(' ') || r.slug;
-  const s = r.score;
-  return `
-  <article class="hero">
-    ${avatar(f.photoUrl, name)}
-    <div class="who">
-      <h1 class="name">${esc(name)}</h1>
-      ${f.headline ? `<p class="headline">${esc(f.headline)}</p>` : ''}
-      <p class="meta">
-        ${f.geoName ? `<span>${esc(f.geoName)}</span>` : ''}
-        <span class="mono" title="LinkedIn member ID. Stays the same when the profile URL changes.">#${f.memberId}</span>
-      </p>
-    </div>
-  </article>
-
-  ${r.changes.length ? renderChanges(r.kind, r.changes, r.previousCheckAt) : ''}
-  ${scoreBlock(s, 'profile')}
-
-  <dl class="facts">
+  const meta = [
+    ...(f.geoName ? [metaSpan(f.geoName)] : []),
+    `<span title="LinkedIn member ID. Stays the same when the profile URL changes.">#${f.memberId}</span>`,
+  ];
+  const facts = `<dl class="facts">
     ${fact('Joined', f.joined ? monthYear(f.joined.at) : '—', f.joined ? `${ageText(f.joined.at)}${f.joined.source === 'memberId' ? ' · est.' : ''}` : '')}
     ${fact('Connections', f.connections ? `${f.connections.count.toLocaleString()}${f.connections.capped ? '+' : ''}` : 'Hidden')}
     ${fact('Followers', f.followers != null ? compact(f.followers) : '—')}
     ${fact('Last post', f.activity ? (f.activity.newestAt ? ago(f.activity.newestAt) : 'Never') : '—', f.activity?.postCount ? `${f.activity.postCount} recent` : '')}
     ${fact('Verified', verifiedText(f).value, verifiedText(f).note)}
-    ${fact('Photo', f.photo?.present ? (f.photo.uploadedAt ? monthYear(f.photo.uploadedAt) : 'Yes') : 'None', f.photo?.present && f.photo.uploadedAt ? 'uploaded' : '')}
-  </dl>
+    ${fact('Photo', ...photoText(f))}
+  </dl>`;
+  return `${identity(name, f.photoUrl, name, f.headline, meta)}
+  ${body(r, facts, renderTimeline(f, r.score.signals.some((x) => x.id === 'pattern.career-vs-age')))}`;
+}
 
-  ${signalsBlock(s)}
-  ${readNotes(r)}
-  ${renderTimeline(f, s.signals.some((x) => x.id === 'pattern.career-vs-age'))}`;
+/** A photo LinkedIn hides from this viewer arrives as null; without the profile record it wasn't checked. */
+function photoText(f: ProfileFacts): [string, string] {
+  if (!f.profileLoaded) return ['—', ''];
+  if (f.photo === null) return ['Hidden', 'from you'];
+  if (!f.photo.present) return ['None', ''];
+  return f.photo.uploadedAt ? [monthYear(f.photo.uploadedAt), 'uploaded'] : ['Yes', ''];
 }
 
 function employeeNote(c: CompanyFacts) {
@@ -142,24 +254,12 @@ function companyFacts(c: CompanyFacts) {
 function renderCompany(r: CompanyScan): string {
   const c = r.facts;
   const name = c.name ?? r.slug;
-  return `
-  <article class="hero">
-    ${avatar(c.logoUrl, name, 'square')}
-    <div class="who">
-      <h1 class="name">${esc(name)}</h1>
-      ${c.tagline ? `<p class="headline">${esc(c.tagline)}</p>` : ''}
-      <p class="meta">
-        ${[c.industry, c.headquarters].filter(Boolean).map((x) => `<span>${esc(x!)}</span>`).join('')}
-        ${c.companyId ? `<span class="mono" title="LinkedIn company ID. Stays the same when the page is renamed.">#${c.companyId}</span>` : ''}
-      </p>
-    </div>
-  </article>
-
-  ${r.changes.length ? renderChanges(r.kind, r.changes, r.previousCheckAt) : ''}
-  ${scoreBlock(r.score, 'company')}
-  ${companyFacts(c)}
-  ${signalsBlock(r.score)}
-  ${readNotes(r)}`;
+  const meta = [
+    ...[c.industry, c.headquarters].filter((x): x is string => !!x).map(metaSpan),
+    ...(c.companyId ? [`<span title="LinkedIn company ID. Stays the same when the page is renamed.">#${c.companyId}</span>`] : []),
+  ];
+  return `${identity(name, c.logoUrl, name, c.tagline, meta)}
+  ${body(r, companyFacts(c), '')}`;
 }
 
 function renderJob(r: JobScan): string {
@@ -167,86 +267,44 @@ function renderJob(r: JobScan): string {
   const c = r.company;
   const x = j.extras;
   const pay = j.salary ? j.salary.text.replace(/\.00/g, '') : 'Not listed';
-  const meta = [j.company.name, j.location].filter(Boolean) as string[];
-  return `
-  <article class="hero">
-    ${avatar(c?.facts.logoUrl ?? null, j.company.name ?? j.title ?? '?', 'square')}
-    <div class="who">
-      <h1 class="name">${esc(j.title ?? 'Job posting')}</h1>
-      <p class="headline">${esc(meta.join(' · '))}</p>
-      <p class="meta">
-        ${j.postedText ? `<span>${esc(j.reposted ? j.postedText : `Posted ${j.postedText}`)}</span>` : ''}
-        ${j.applicants ? `<span>${j.applicants.over ? 'Over ' : ''}${j.applicants.count.toLocaleString()} applicants</span>` : ''}
-      </p>
-    </div>
-  </article>
-
-  ${r.changes.length ? renderChanges(r.kind, r.changes, r.previousCheckAt) : ''}
-  ${scoreBlock(r.score, 'job')}
-
-  <dl class="facts">
+  const meta = [
+    ...(j.postedText ? [metaSpan(j.reposted ? j.postedText : `Posted ${j.postedText}`)] : []),
+    ...(j.applicants ? [metaSpan(`${j.applicants.over ? 'Over ' : ''}${j.applicants.count.toLocaleString()} applicants`)] : []),
+  ];
+  const facts = `<dl class="facts">
     ${fact('Pay', pay)}
     ${fact('Type', j.employmentType ?? '—', [j.extras?.remote ? 'Remote' : null, j.seniority && j.seniority !== 'Not Applicable' ? j.seniority : null].filter(Boolean).join(' · '))}
     ${fact('Apply', j.apply === 'easy' ? 'Easy Apply' : (siteDomain(x?.applyUrl) ?? (j.apply === 'offsite' ? 'Company site' : '—')), j.apply === 'offsite' && x?.applyUrl ? 'external site' : '')}
     ${x?.listedAt ? fact('Listed', monthDay(x.listedAt), x.originalListedAt && x.listedAt - x.originalListedAt > 86_400_000 ? `first ${monthDay(x.originalListedAt)}` : '') : ''}
     ${x ? fact('Verified job', x.verified ? 'Yes' : x.verified === false ? 'No' : '—') : ''}
     ${x?.expireAt ? fact('Closes', monthDay(x.expireAt), x.state && x.state !== 'LISTED' ? x.state.toLowerCase() : '') : ''}
-  </dl>
-
-  ${signalsBlock(r.score)}
-  ${readNotes(r)}
-  ${
-    x?.hiringTeam.length
-      ? `<section class="group"><h3>Hiring team<span class="count">${x.hiringTeam.length}</span></h3><ul class="signals">${x.hiringTeam
-          .map((p) => `<li><a class="link" href="https://www.linkedin.com/in/${encodeURIComponent(p.slug)}/" target="_blank" rel="noopener">${esc(p.name ?? p.slug)}</a><span class="count">check profile</span></li>`)
-          .join('')}</ul></section>`
-      : ''
-  }
-  ${
-    c
-      ? `<section class="group company-sub level-${c.score.level}">
-      <h3>Company page<span class="count">${esc(c.facts.name ?? '')}</span><span class="sub-score">${c.score.score}<small>/100</small></span></h3>
+  </dl>`;
+  const team = x?.hiringTeam.length
+    ? `<section class="sec team">${heading('Hiring team', x.hiringTeam.length)}<ul>${x.hiringTeam
+        .map((p) => `<li><a class="link" href="https://www.linkedin.com/in/${encodeURIComponent(p.slug)}/" target="_blank" rel="noopener">${esc(p.name ?? p.slug)}</a><span>check profile</span></li>`)
+        .join('')}</ul></section>`
+    : '';
+  const flags = c ? sides(c.score).against.slice(0, 4) : [];
+  const companyBlock = c
+    ? `<section class="sec company-sub">${heading('Company page')}
+      <div class="sub-lvl level-${c.score.level}"><span class="tag" aria-hidden="true">${TAG[c.score.level]}</span><b>${esc(c.facts.name ?? j.company.name ?? 'This company')}</b><span>${TITLE[c.score.level]}</span></div>
       ${companyFacts(c.facts)}
-      ${c.score.signals.filter((x) => x.weight > 0).slice(0, 4).length ? `<ul class="signals compact">${c.score.signals.filter((x) => x.weight > 0).slice(0, 4).map((x) => `<li><span>${esc(x.label)}</span><span class="w">+${Math.round(x.weight)}</span></li>`).join('')}</ul>` : ''}
+      ${flags.length ? `<div class="col against"><ul>${flags.map((s) => signalItem(s, '✕')).join('')}</ul></div>` : ''}
     </section>`
-      : ''
-  }`;
+    : '';
+  return `${identity(j.company.name ?? j.title ?? '?', c?.facts.logoUrl ?? null, j.title ?? 'Job posting', [j.company.name, j.location].filter(Boolean).join(' · ') || null, meta)}
+  ${body(r, facts, team + companyBlock)}`;
 }
 
+/** A small avatar with initials, for list rows (Saved, Reports). */
 export function avatar(photoUrl: string | null, name: string, cls = '') {
   const initials = esc(name.split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase());
   const url = photoUrl && /^https:\/\//.test(photoUrl) ? photoUrl : null;
   return `<div class="avatar${cls ? ` ${cls}` : ''}">${url ? `<img src="${esc(url)}" alt="" referrerpolicy="no-referrer">` : ''}<span>${initials}</span></div>`;
 }
 
-/** Score on a fixed low / medium / high scale, so the number has context. */
-function meter(score: number) {
-  const pct = Math.max(0, Math.min(100, score));
-  return `<div class="meter" aria-hidden="true">
-    <div class="meter-track"><i class="z-low"></i><i class="z-med"></i><i class="z-high"></i><b style="left:${pct}%"></b></div>
-    <div class="meter-labels"><span>Low</span><span>Medium</span><span>High</span></div>
-  </div>`;
-}
-
 function fact(label: string, value: string, note = '') {
   return `<div class="fact"><dt>${esc(label)}</dt><dd>${esc(value)}${note ? `<small>${esc(note)}</small>` : ''}</dd></div>`;
-}
-
-function groupSignals(signals: Signal[]) {
-  return {
-    discrepancy: signals.filter((x) => x.kind === 'discrepancy'),
-    weak: signals.filter((x) => x.kind === 'weak'),
-    trust: signals.filter((x) => x.kind === 'trust'),
-  };
-}
-
-function signalGroup(title: string, kind: Signal['kind'], list: Signal[]) {
-  return `<section class="group ${kind}"><h3>${title}<span class="count">${list.length}</span></h3><ul class="signals">${list
-    .map((x) => {
-      const w = Math.round(x.weight * 10) / 10;
-      return `<li><span>${esc(x.label)}</span><span class="w">${w > 0 ? '+' : '−'}${Math.abs(w)}</span></li>`;
-    })
-    .join('')}</ul></section>`;
 }
 
 /** Career spans against the account's join date: the mismatch is visible at a glance. */
@@ -282,7 +340,7 @@ function renderTimeline(f: ProfileFacts, mismatch: boolean) {
     jx != null
       ? `<div class="tl-joined"><span class="${jx < 30 ? 'start' : jx > 70 ? 'end' : ''}" style="left:${jx}%">Joined LinkedIn ${monthYear(f.joined!.at)}</span></div>`
       : '';
-  return `<section class="group timeline"><h3>Career vs. account age</h3>
+  return `<section class="sec timeline">${heading('Career vs. account age')}
     <div class="tl-wrap${jx != null ? ' has-join' : ''}${mismatch ? ' bad' : ''}" style="${jx != null ? `--join:${jx}%` : ''}"><ul>${rows}</ul>${joinLabel}</div>
     <div class="tl-axis"><span>${minY}</span><span>${now.getUTCFullYear()}</span></div></section>`;
 }
