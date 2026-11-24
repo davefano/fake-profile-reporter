@@ -77,7 +77,7 @@ The Community database is live with no bot check. Its rate limiter is a read-the
 - R4. All panel text is Geist, loaded from files inside the extension, in weights 400 and 600 and sizes 12, 13, 14, 16 and 28. Numbers line up (tabular figures).
 - R5. Settings › Appearance offers six palette cards with a preview, a name, a one-line description and the source note. The choice applies at once, persists per browser, and shows no flash of the wrong palette when the panel opens. Small text meets 4.5:1 contrast in every palette.
 - R6. The header uses a gear icon for Settings. "Track" is renamed "Save" everywhere. Loading, empty, error, Saved, Reports and the rest of Settings are restyled to the new look.
-- R7. A photo hidden from the viewer reads "Hidden, from you" in the facts and never as "None".
+- R7. A photo LinkedIn doesn't show the viewer reads "None shown, to you" in the facts and never as "None": the same payload means no photo or one limited to their network.
 
 **Reports**
 

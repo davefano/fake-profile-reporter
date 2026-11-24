@@ -10,4 +10,4 @@ One line per agent mistake, so it isn't repeated. A repeat becomes a check.
 - Read the text after the last `<strong>` name for mutual connections and miscounted. Take the whole inline run.
 - Wrote real people's member IDs into tests and calibration data. Use synthetic fixtures and rounded values.
 - Seated `/council` from the skill's defaults without reading `docs/dev/agent-models.md`, and called that file stray. Read the repo's model doc first.
-- Read a `profilePicture` field with its image stripped out as "no photo"; the member had hidden it from the research account. Empty field = hidden (not checked); absent field = no photo.
+- Read a `profilePicture` field with its image stripped out as "no photo"; the member had hidden it from the research account. Empty field = none shown to this viewer, either no photo or one limited to their network (not checked); absent field = no photo. Copy must not claim which.

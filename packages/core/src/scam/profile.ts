@@ -192,7 +192,7 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
     missing.push('Profile record (experience, education, skills, photo)');
   } else {
     if (f.photo && !f.photo.present) add('photo.none', 'No profile photo', 8);
-    if (!f.photo) missing.push('Profile photo (hidden from your account)');
+    if (!f.photo) missing.push("Profile photo (none shown to you: there may be none, or it's limited to their network)");
     if (f.positions.length === 0) add('profile.no-experience', 'No experience listed', 10);
     else if (f.positions.length === 1) add('profile.one-position', 'Only one position listed', 3);
     if (f.educations.length === 0) add('profile.no-education', 'No education listed', 4);

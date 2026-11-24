@@ -412,7 +412,7 @@ describe('scoreProfile', () => {
     const ids = s.signals.map((x) => x.id);
     expect(ids).not.toContain('photo.none');
     expect(ids).not.toContain('aged.shell');
-    expect(s.missing).toContain('Profile photo (hidden from your account)');
+    expect(s.missing).toContain("Profile photo (none shown to you: there may be none, or it's limited to their network)");
     expect(extractProfileFacts(fakeSnapshot({ photoUploadedAt: null }), NOW).photo).toEqual({ present: false, uploadedAt: null });
   });
 

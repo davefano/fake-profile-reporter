@@ -113,9 +113,9 @@ describe('layout A', () => {
     expect(detail).not.toContain('raised the level');
   });
 
-  test('photo: hidden from you is not "None"', () => {
+  test('photo: none shown to you is not "None"', () => {
     const photoFact = (html: string) => /<dt>Photo<\/dt><dd>([\s\S]*?)<\/dd>/.exec(html)![1];
-    expect(photoFact(renderResult(profile({ facts: facts({ photo: null }) })))).toBe('Hidden<small>from you</small>');
+    expect(photoFact(renderResult(profile({ facts: facts({ photo: null }) })))).toBe('None shown<small>to you</small>');
     expect(photoFact(renderResult(profile({ facts: facts({ photo: { present: false, uploadedAt: null } }) })))).toBe('None');
     // Without the profile record the photo wasn't checked at all.
     expect(photoFact(renderResult(profile({ facts: facts({ photo: null, profileLoaded: false }) })))).toBe('—');

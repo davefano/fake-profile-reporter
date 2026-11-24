@@ -222,10 +222,10 @@ function renderProfile(r: ProfileScan): string {
   ${body(r, facts, renderTimeline(f, r.score.signals.some((x) => x.id === 'pattern.career-vs-age')))}`;
 }
 
-/** A photo LinkedIn hides from this viewer arrives as null; without the profile record it wasn't checked. */
+/** null: LinkedIn showed this viewer no photo, and can't say whether there is none or it's limited to their network. */
 function photoText(f: ProfileFacts): [string, string] {
   if (!f.profileLoaded) return ['—', ''];
-  if (f.photo === null) return ['Hidden', 'from you'];
+  if (f.photo === null) return ['None shown', 'to you'];
   if (!f.photo.present) return ['None', ''];
   return f.photo.uploadedAt ? [monthYear(f.photo.uploadedAt), 'uploaded'] : ['Yes', ''];
 }
