@@ -4,7 +4,7 @@
 import type { CompanyFacts, FactChange, JobFacts, LinkedInTarget, ProfilePart } from '@fpr/core/linkedin';
 import type { Score } from '@fpr/core/scam';
 import type { ReportCounts } from '@fpr/core/scam';
-import type { LeaderboardResponse, ReportRequest, VerifyResponse } from '@fpr/core/wire';
+import type { LeaderboardResponse, RemovalRequest, RemovalResponse, ReportRequest, VerifyResponse } from '@fpr/core/wire';
 import type { ApiError } from '@/lib/api';
 import type { ProfileResult } from '@/lib/linkedin/protocol';
 import { send, type ErrorResponse } from '@/lib/runtime';
@@ -89,6 +89,8 @@ export interface AppMessages {
   FPR_VERIFY: { req: { type: 'FPR_VERIFY'; server: string; token: string; challenge: string }; res: VerifyResponse | ErrorResponse };
   /** The bot check runs in a tab: wait until `server` says it passed, then send `key` if given. */
   FPR_VERIFY_WAIT: { req: { type: 'FPR_VERIFY_WAIT'; server: string; key?: string }; res: VerifyWaitResult | ErrorResponse };
+  /** Ask the server Save to points at to remove this profile (the panel checked the code first). */
+  FPR_REMOVAL: { req: { type: 'FPR_REMOVAL' } & RemovalRequest; res: RemovalResponse | ApiError };
   /** Reported profiles on the server saves go to. */
   FPR_LEADERBOARD: { req: { type: 'FPR_LEADERBOARD' }; res: LeaderboardResponse | ErrorResponse };
   /** Send saves the server doesn't have yet. */

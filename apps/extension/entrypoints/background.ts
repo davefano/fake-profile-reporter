@@ -1,8 +1,9 @@
 // Background: the toolbar toggle, and routing for the scam-check feature.
 
-import type { LeaderboardResponse } from '@fpr/core/wire';
+import type { LeaderboardResponse, RemovalResponse } from '@fpr/core/wire';
 import { api } from '@/lib/api';
 import { serve } from '@/lib/runtime';
+import { reporterKeyFor } from '@/lib/saves/reporter';
 import { getSettings, serverBase } from '@/lib/saves/settings';
 import { uploadPending } from '@/lib/saves/upload';
 import type { AppMessages } from '@/lib/scan/messages';
@@ -27,6 +28,11 @@ export default defineBackground({
       FPR_LEADERBOARD: async () => {
         const base = serverBase(await getSettings());
         return base ? api<LeaderboardResponse>(base, 'GET', '/api/leaderboard?limit=50') : NO_SERVER;
+      },
+      FPR_REMOVAL: async ({ memberId, code, contact }) => {
+        const base = serverBase(await getSettings());
+        const body = { memberId, code, ...(contact !== undefined && { contact }) };
+        return base ? api<RemovalResponse>(base, 'POST', '/api/removals', body, await reporterKeyFor(base)) : NO_SERVER;
       },
       FPR_UPLOAD: async () => {
         const base = serverBase(await getSettings());

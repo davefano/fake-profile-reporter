@@ -3,6 +3,7 @@
 // the footer. Pure functions of the scan; all text is escaped. Canvases are
 // drawn afterwards by dither.ts.
 
+import { removalMarkup } from './removal';
 import { reportMarkup } from './report-form';
 import { siteDomain, verifiedEmployers, type CompanyFacts, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
 import { levelFor, type RiskLevel, type Score, type Signal } from '@fpr/core/scam';
@@ -16,6 +17,7 @@ export function renderResult(r: ScanResult): string {
   const body = r.kind === 'company' ? renderCompany(r) : r.kind === 'job' ? renderJob(r) : renderProfile(r);
   return `${body}
   ${footer(r)}
+  ${r.kind === 'profile' && r.facts.memberId ? removalMarkup() : ''}
   ${actions(r)}`;
 }
 

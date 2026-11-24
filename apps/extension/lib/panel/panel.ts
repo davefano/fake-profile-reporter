@@ -9,6 +9,7 @@ import { paintDither, watchDither } from './dither';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
 import { applyMirroredPalette, applyPalette } from './palettes';
 import { errorText, mountReport, showUnsent } from './report-form';
+import { mountRemoval } from './removal';
 import { loadSaved } from './saved';
 import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
 import { renderResult } from './views';
@@ -143,6 +144,7 @@ function bindResult() {
     return { base, label: base && settings ? destinationLabel(settings) : null };
   };
   mountReport(scanKey(current), current.kind, dest, invalidateLeaderboard);
+  if (current.kind === 'profile' && current.facts.memberId) mountRemoval($('removal'), current.facts.memberId, dest);
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
     img.addEventListener('error', () => img.remove(), { once: true }),
   );

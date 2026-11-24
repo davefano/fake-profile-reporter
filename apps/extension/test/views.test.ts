@@ -147,6 +147,13 @@ describe('layout A', () => {
     expect(html).toContain('recent activity');
   });
 
+  test('profile results end with a quiet "This is my profile" link for your own profile only (R17)', () => {
+    const html = renderResult(profile());
+    expect(html).toContain('id="meBtn"');
+    expect(html).toMatch(/This is my profile<\/button> <span>[^<]*Only for your own profile/);
+    expect(html.indexOf('id="removal"')).toBeGreaterThan(html.indexOf('class="foot"'));
+  });
+
   test('copy never says someone is fake', () => {
     for (const s of [MIXED, FLOORED, score(), score({ level: 'high', score: 80, signals: MIXED.signals })]) {
       expect(renderResult(profile({ score: s })).toLowerCase()).not.toMatch(/is fake|are fake|fake profile|fake account/);
@@ -171,6 +178,12 @@ describe('company and job', () => {
     expect(html).toContain('<h2>Some concerns</h2>');
     expect(section(html, 'against')).toContain('No website listed');
     expect(html).toContain('<dt>Founded</dt>');
+  });
+
+  test('only profile results with a member ID get the "This is my profile" link', () => {
+    const c: CompanyScan = { kind: 'company', slug: 'example-brand-careers', facts: company(), capturedAt: NOW, errors: {}, changes: [], previousCheckAt: null, cached: false, score: score() };
+    expect(renderResult(c)).not.toContain('This is my profile');
+    expect(renderResult(profile({ facts: facts({ memberId: null }) }))).not.toContain('This is my profile');
   });
 
   test('a job result renders the hiring team and the company block', () => {
