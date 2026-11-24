@@ -115,7 +115,7 @@ export function scoreJob(job: JobFacts, company: CompanyFacts | null, companySco
   if (!x) {
     missing.push('Apply link, posting history and verification (needs signed-in LinkedIn)');
   } else {
-    if (x.verified) add('job.verified', 'LinkedIn marked this as a verified job', -12);
+    if (x.verified) add('job.verified', 'LinkedIn marked this as a verified job', -12, { strength: 'major' });
     else if (x.verified == null) missing.push('Verified job badge');
     const applyDomain = siteDomain(x.applyUrl);
     if (applyDomain) {

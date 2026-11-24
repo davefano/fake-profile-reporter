@@ -59,8 +59,8 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   // previous owner of the account.
   const verifications = f.about?.verifications ?? [];
   if (f.about) {
-    if (verifications.some((s) => /^identity/i.test(s))) add('verified.identity', 'Identity verified by LinkedIn', -30);
-    else if (!verifications.length) add('verified.none', 'No LinkedIn verifications', 6);
+    if (verifications.some((s) => /^identity/i.test(s))) add('verified.identity', 'Identity verified by LinkedIn', -30, { strength: 'major' });
+    else if (!verifications.length) add('verified.none', 'No LinkedIn verifications', 6, { strength: 'minor' });
   } else {
     missing.push('Join date and verifications (About this member)');
   }
@@ -79,23 +79,23 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   // A senior title with almost no network is a classic fake-recruiter pattern.
   const title = [f.headline, f.positions[0]?.title].filter(Boolean).join(' ');
   if (SENIOR.test(title) && conns && !conns.capped && conns.count < 50) {
-    add('pattern.senior-no-network', 'Senior title but almost no network', 12);
+    add('pattern.senior-no-network', 'Senior title but almost no network', 12, { strength: 'major' });
   }
 
   // Claimed career vs. the account and network it comes with.
   const starts = f.positions.map((p) => p.start?.year).filter((y): y is number => !!y);
   const careerYears = starts.length ? new Date(now).getUTCFullYear() - Math.min(...starts) : 0;
   if (careerYears >= 10 && ageMs != null && ageMs < YEAR) {
-    add('pattern.career-vs-age', `Claims ${careerYears} years of work history on an account under a year old`, 18);
+    add('pattern.career-vs-age', `Claims ${careerYears} years of work history on an account under a year old`, 18, { strength: 'major' });
   } else if (careerYears >= 8 && ageMs != null && ageMs < 2 * YEAR) {
-    add('pattern.career-vs-age', `Claims ${careerYears} years of work history on a new account`, 10);
+    add('pattern.career-vs-age', `Claims ${careerYears} years of work history on a new account`, 10, { strength: 'minor' });
   }
 
   // Recruiter/HR persona. Most job scams use one, so an unproven one matters
   // more. Only when verifications were actually read: unknown is not "none".
   if (RECRUITER.test(title) && f.about && !f.about.verifications.length) {
-    if (ageMs != null && ageMs < YEAR) add('pattern.recruiter-new', 'Recruiter/HR persona on an account under a year old', 15);
-    else add('pattern.recruiter-unverified', 'Recruiter/HR persona with no verification', 6);
+    if (ageMs != null && ageMs < YEAR) add('pattern.recruiter-new', 'Recruiter/HR persona on an account under a year old', 15, { strength: 'major' });
+    else add('pattern.recruiter-unverified', 'Recruiter/HR persona with no verification', 6, { strength: 'minor' });
   }
 
   // Claims a current job at a real company page but has no work-email
@@ -105,16 +105,16 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   if (current && f.about && ageMs != null && ageMs < 2 * YEAR) {
     const name = current.company!.toLowerCase();
     if (!verifiedEmployers(f.about).includes(name)) {
-      add('pattern.employer-unverified', `Claims to work at ${current.company} without workplace verification`, 8);
+      add('pattern.employer-unverified', `Claims to work at ${current.company} without workplace verification`, 8, { strength: 'minor' });
     }
   }
 
   // An audience with nothing to show for it suggests bought or farmed followers.
   if (f.followers != null && f.followers >= 300 && f.activity?.postCount === 0 && ageMs != null && ageMs < YEAR) {
-    add('pattern.followers-no-activity', `${f.followers.toLocaleString('en-US')} followers on a new account that has never posted`, 8);
+    add('pattern.followers-no-activity', `${f.followers.toLocaleString('en-US')} followers on a new account that has never posted`, 8, { strength: 'minor' });
   }
   if (careerYears >= 5 && conns && !conns.capped && conns.count < 50) {
-    add('pattern.career-no-network', `${careerYears}-year career but only ${conns.count} connections`, 10);
+    add('pattern.career-no-network', `${careerYears}-year career but only ${conns.count} connections`, 10, { strength: 'minor' });
   }
 
   // Activity.
@@ -135,7 +135,7 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
     // Only when activity was actually checked: unknown is not the same as none.
     const quiet = f.activity?.postCount === 0;
     if (quiet && f.photo && !f.photo.present) {
-      add('aged.shell', 'Old account with no photo that has never posted (common in bought accounts, and easy to impersonate)', 6);
+      add('aged.shell', 'Old account with no photo that has never posted', 6, { detail: 'common in bought accounts, and easy to impersonate' });
       resale.push('no photo, never posted');
     }
     const recent = (ms: number | null | undefined) => ms != null && now - ms < 180 * DAY;
@@ -146,13 +146,13 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
       recentText(f.about?.contactInfoUpdated) ? 'contact info' : null,
     ].filter(Boolean);
     if (refreshed.length && quiet) {
-      add('aged.refreshed', `Old, inactive account with recently changed ${refreshed.join(' and ')} (possible resale or takeover)`, 6);
+      add('aged.refreshed', `Old, inactive account with recently changed ${refreshed.join(' and ')}`, 6, { detail: 'possible resale or takeover' });
       resale.push(`${refreshed.join(' and ')} changed recently`);
     }
     // The industry is set early and rarely revisited, so it can outlive a persona.
     const role = [f.headline, f.positions[0]?.title].filter(Boolean).join(' ');
     if (f.industry && TECH_ROLE.test(role) && !TECH_INDUSTRY.test(f.industry)) {
-      add('aged.industry-mismatch', `Industry "${f.industry}" doesn't fit a tech role (can be left over from an earlier persona)`, 5);
+      add('aged.industry-mismatch', `Industry "${f.industry}" doesn't fit a tech role`, 5, { detail: 'can be left over from an earlier persona' });
       resale.push('industry left over');
     }
     // Plenty of real people never customize it, so only on accounts nobody uses.
@@ -165,8 +165,13 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   if (f.profileLoaded && initialOnly(f.lastName) && resale.length) resale.push('surname reduced to an initial');
   // One sign means little; several together describe an account that changed hands.
   const resold = resale.length >= 3;
-  // 3 signs: 12; each more: +6. From 4 up it also keeps the level at least medium.
-  if (resold) add('pattern.aged-resale', `Several signs this old account changed hands: ${resale.join('; ')}`, 12 + 6 * (resale.length - 3));
+  // 3 signs: 12; each more: +6. From 4 up the level is at least high.
+  if (resold) {
+    add('pattern.aged-resale', `Several signs this old account changed hands: ${resale.join('; ')}`, 12 + 6 * (resale.length - 3), {
+      strength: 'major',
+      ...(resale.length >= 4 && { floor: 'high' }),
+    });
+  }
 
   // Trust that resale would carry over: deferred from above, and discounted when it looks resold.
   if (f.joined && ageMs != null && ageMs > 5 * YEAR) {
@@ -178,8 +183,8 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   const workEmail = verifications.filter((v) => !/^identity/i.test(v));
   if (workEmail.length && !verifications.some((v) => /^identity/i.test(v))) {
     const label = workEmail.map(verificationLabel).join('; ');
-    if (resold) add('verified.other', `${label} (may predate a change of owner)`, -6);
-    else add('verified.other', label, -12);
+    if (resold) add('verified.other', label, -6, { strength: 'minor', detail: 'may predate a change of owner' });
+    else add('verified.other', label, -12, { strength: 'major' });
   }
 
   // Profile completeness. If the record didn't load, these are unknown, not empty.
@@ -210,12 +215,17 @@ export function scoreProfile(f: ProfileFacts, now = Date.now()): Score {
   }
 
   // Connections you share. Relative to the viewer: real to *you*, not proof in general.
-  if (f.mutualConnections) add('trust.mutual', `${f.mutualConnections} mutual connection${f.mutualConnections === 1 ? '' : 's'} with you (relative to you; not in the shared score)`, -Math.min(10, 3 + f.mutualConnections));
+  if (f.mutualConnections) add('trust.mutual', `${f.mutualConnections} mutual connection${f.mutualConnections === 1 ? '' : 's'} with you`, -Math.min(10, 3 + f.mutualConnections), { detail: 'relative to you; not in the shared score' });
 
   // Other trust signals.
   if (f.premium) add('trust.premium', 'Premium subscriber', -4);
   if (f.influencer) add('trust.influencer', 'LinkedIn Top Voice / influencer', -10);
   if (f.followers != null && f.followers > 10_000) add('trust.followers', `${f.followers.toLocaleString('en-US')} followers`, -6);
+
+  // LinkedIn has checked who holds the account, so a pattern can raise it to medium at most.
+  if (signals.some((x) => x.id === 'verified.identity')) {
+    for (const x of signals) if (x.floor === 'high') x.floor = 'medium';
+  }
 
   return finishScore(signals, missing);
 }

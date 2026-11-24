@@ -67,6 +67,16 @@ describe('company pages', () => {
     }
   });
 
+  test('a strong discrepancy carries a medium floor, a weaker one none', () => {
+    const c = parseCompanyPage(
+      companyHtml({ name: 'Example Brand Careers', followers: '14', employees: 2, size: '1,001-5,000 employees', website: 'https://examplebrand.wixsite.com/jobs', posts: [], logoAt: null }),
+      'example-brand-careers',
+    );
+    const byId = Object.fromEntries(scoreCompany(c, NOW).signals.map((x) => [x.id, x]));
+    expect(byId['company.size-mismatch']?.floor).toBe('medium');
+    expect(byId['company.hiring-name']?.floor).toBeUndefined();
+  });
+
   test('staffing firms are not flagged for recruiting names', () => {
     const c = parseCompanyPage(companyHtml({ name: 'Acme Recruiting', industry: 'Staffing and Recruiting' }), 'acme-recruiting');
     expect(scoreCompany(c, NOW).signals.map((x) => x.id)).not.toContain('company.hiring-name');
@@ -95,6 +105,14 @@ describe('job postings', () => {
   test('an ordinary posting from an established company scores low', () => {
     const j = parseJobPosting(jobHtml({}), '1', NOW);
     expect(scoreJob(j, company, companyScore).level).toBe('low');
+  });
+
+  test('a strong discrepancy keeps an otherwise low posting at medium', () => {
+    const j = parseJobPosting(jobHtml({ description: '<p>Message the hiring manager on WhatsApp to arrange a call about this role and your availability this week.</p>'.padEnd(500, 'x') }), '6', NOW);
+    const s = scoreJob(j, company, companyScore);
+    expect(s.signals.find((x) => x.id === 'job.chat-app')?.floor).toBe('medium');
+    expect(s.score).toBeLessThan(30);
+    expect(s.level).toBe('medium');
   });
 
   test('chat apps, personal email and equipment checks score high', () => {
