@@ -5,7 +5,9 @@ import { isError, type ErrorResponse } from '@/lib/runtime';
 import { destinationLabel, getSettings, onSettingsChanged, serverBase, type Settings } from '@/lib/saves/settings';
 import { linkedInTarget } from '@fpr/core/linkedin';
 import { scanKey, sendMessage, targetKey, type ScanResult, type SubmitResponse } from '@/lib/scan/messages';
+import { paintDither, watchDither } from './dither';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
+import { applyMirroredPalette, applyPalette } from './palettes';
 import { mountReport } from './report-form';
 import { loadSaved } from './saved';
 import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
@@ -27,7 +29,7 @@ const MARKUP = `
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 10a6.5 6.5 0 1 1-2-4.7M16.5 3.5v3.8h-3.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings" aria-pressed="false">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
     </button>
   </div>
   <nav class="tabs" role="tablist">
@@ -50,7 +52,7 @@ const MARKUP = `
     <div id="state-empty" class="hidden">
       <div class="empty">
         <svg class="empty-art" viewBox="0 0 120 96" aria-hidden="true">
-          <rect x="14" y="14" width="76" height="62" rx="10" fill="var(--sunken)" stroke="var(--line)" stroke-width="2"/>
+          <rect x="14" y="14" width="76" height="62" rx="10" fill="var(--raised)" stroke="var(--line)" stroke-width="2"/>
           <circle cx="38" cy="38" r="10" fill="var(--line)"/>
           <rect x="54" y="32" width="26" height="5" rx="2.5" fill="var(--line)"/>
           <rect x="54" y="42" width="18" height="5" rx="2.5" fill="var(--line)"/>
@@ -129,6 +131,7 @@ async function scan(force = false) {
   $('result').innerHTML = renderResult(res);
   bindResult();
   showState('result');
+  paintDither($('result'));
 }
 
 // --- actions ---------------------------------------------------------------------
@@ -194,16 +197,19 @@ function bindTabs() {
   $('settingsBtn').addEventListener('click', () => showView($('view-settings').classList.contains('active') ? 'scan' : 'settings'));
 }
 
-/** Header and tabs follow Settings › Save to. */
+/** Header and tabs follow Settings › Save to; the page follows Appearance. */
 async function applySettings() {
+  const before = settings && serverBase(settings);
   settings = await getSettings();
+  applyPalette(settings.palette);
+  paintDither();
   const base = serverBase(settings);
   // Safari shows this UI as a popup, not a side panel.
   const surface = location.pathname.includes('popup') ? '' : 'Side Panel · ';
   $('apiBase').textContent = surface + (base ? `Saving to ${destinationLabel(settings)}` : 'Just me');
   $('boardTab').classList.toggle('hidden', !base);
   if (!base && $('view-board').classList.contains('active')) showView('saved');
-  invalidateLeaderboard();
+  if (base !== before) invalidateLeaderboard();
 }
 
 /** Follow the active tab: rescan when it lands on a different profile. */
@@ -251,7 +257,9 @@ async function announcePanel() {
 }
 
 export async function mountPanel() {
+  applyMirroredPalette();
   document.body.innerHTML = MARKUP;
+  watchDither(document.body);
   bindTabs();
   bindSettings();
   onSettingsChanged(applySettings);

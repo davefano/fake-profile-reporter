@@ -2,6 +2,7 @@
 // database), or "My own server". Saves are always kept in this browser too.
 
 import { COMMUNITY_URL } from '@/lib/config';
+import type { PaletteChoice } from '@/lib/panel/palettes';
 
 export type SaveMode = 'local' | 'community' | 'custom';
 
@@ -11,10 +12,12 @@ export interface Settings {
   customUrl: string;
   /** Servers we already offered to upload earlier saves to. Asked once each. */
   offeredUpload: string[];
+  /** Settings › Appearance. */
+  palette: PaletteChoice;
 }
 
 const KEY = 'settings';
-const DEFAULTS: Settings = { mode: 'local', customUrl: '', offeredUpload: [] };
+const DEFAULTS: Settings = { mode: 'local', customUrl: '', offeredUpload: [], palette: 'system' };
 
 export async function getSettings(): Promise<Settings> {
   const raw = (await browser.storage.local.get(KEY))[KEY] as Partial<Settings> | undefined;
