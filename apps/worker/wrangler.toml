@@ -30,6 +30,10 @@ bucket_name = "fpr-snapshots"
 # [vars]
 # VERIFY_HOST = "api.example.com"
 
+# The Community server has it on.
+[vars]
+VERIFY_HOST = "api.fake-profile-reporter.workers.dev"
+
 # Daily retention deletes (src/removals.ts): old removal-request contacts and
 # decided requests, expired bot-check rows, earlier days' counters.
 [triggers]
