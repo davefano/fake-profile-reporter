@@ -9,10 +9,11 @@
 // score is never trusted.
 
 import { Hono, type Context } from 'hono';
-import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type RawSnapshot, type Score, type SnapshotResponse } from '@fpr/core';
+import { extractProfileFacts, observeProfile, scoreProfile, type FactChange, type LeaderboardResponse, type ProfileFacts, type GoneError, type RawSnapshot, type Score, type SnapshotResponse } from '@fpr/core';
 import type { Env } from './env';
 import { createAccountStore } from './accounts-store';
 import { gunzipLimited, gzip, TooLarge } from './json';
+import { toHex } from './ip';
 import { reporterLimits } from './limits';
 import { cleanSnapshot } from './snapshot';
 
@@ -26,10 +27,12 @@ const isGzip = (b: Uint8Array) => b[0] === 0x1f && b[1] === 0x8b;
 
 async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return toHex(new Uint8Array(digest).slice(0, 8));
 }
 
 accounts.post('/api/snapshots', async (c) => {
+  // Builds up to 2026.11.23.1 reported with ?report=1. Refuse before storing anything.
+  if (c.req.query('report') === '1') return c.json({ error: 'upgrade_required' satisfies GoneError }, 410);
   if (Number(c.req.header('content-length') || 0) > MAX_BYTES) return c.json({ error: 'too_large' }, 413);
   const body = new Uint8Array(await c.req.arrayBuffer());
   if (body.byteLength > MAX_BYTES) return c.json({ error: 'too_large' }, 413);
@@ -57,6 +60,10 @@ accounts.post('/api/snapshots', async (c) => {
   }
   if (!facts.memberId) return c.json({ error: 'no_member_id' }, 422);
   const memberId = facts.memberId;
+  const store = createAccountStore(c.env.DB);
+  // Before any R2 write. The commits below re-check inside their batch, for an approval landing meanwhile.
+  const removed = () => c.json({ error: 'removed' satisfies GoneError }, 410);
+  if (await store.isRemoved(memberId)) return removed();
 
   const limits = await reporterLimits(c, now);
   const day = await limits.daily('snapshots', DAILY_LIMIT);
@@ -64,7 +71,6 @@ accounts.post('/api/snapshots', async (c) => {
   const snapCd = await limits.cooldown(`snapshot:${memberId}`, SNAPSHOT_COOLDOWN_MS);
   if (!snapCd.ok) return c.json({ error: 'captured_recently' }, 429);
 
-  const store = createAccountStore(c.env.DB);
   const finish = async (score: Score, changes: FactChange[]) => {
     await day.commit();
     // The directory's score for the account now.
@@ -96,7 +102,8 @@ accounts.post('/api/snapshots', async (c) => {
   // Merge with the account's current facts and commit, all or nothing, from the
   // version read here. If another upload moved the account first, merge again.
   for (let attempt = 0; attempt < 3; attempt++) {
-    // A concurrent identical upload may have recorded this capture meanwhile.
+    // The member may have been removed meanwhile, or a concurrent identical upload recorded this capture.
+    if (attempt > 0 && (await store.isRemoved(memberId))) return removed();
     if (attempt > 0 && (await store.hasSnapshot(r2Key))) return (await answerStored()) ?? c.json({ error: 'busy' }, 409);
     const prev = await store.current(memberId);
     if (prev && prev.capturedAt > capturedAt) {

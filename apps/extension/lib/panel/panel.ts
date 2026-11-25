@@ -5,8 +5,12 @@ import { isError, type ErrorResponse } from '@/lib/runtime';
 import { destinationLabel, getSettings, onSettingsChanged, serverBase, type Settings } from '@/lib/saves/settings';
 import { linkedInTarget } from '@fpr/core/linkedin';
 import { scanKey, sendMessage, targetKey, type ScanResult, type SubmitResponse } from '@/lib/scan/messages';
+import { paintDither, watchDither } from './dither';
 import { invalidateLeaderboard, loadLeaderboard } from './leaderboard';
-import { mountReport } from './report-form';
+import { applyMirroredPalette, applyPalette } from './palettes';
+import { errorText, mountReport, showUnsent } from './report-form';
+import { mountRemoval } from './removal';
+import { panelError } from './format';
 import { loadSaved } from './saved';
 import { bindSettings, refreshSettings, SETTINGS_MARKUP } from './settings';
 import { renderResult } from './views';
@@ -27,7 +31,7 @@ const MARKUP = `
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.5 10a6.5 6.5 0 1 1-2-4.7M16.5 3.5v3.8h-3.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings" aria-pressed="false">
-      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
     </button>
   </div>
   <nav class="tabs" role="tablist">
@@ -39,22 +43,22 @@ const MARKUP = `
 
 <main>
   <section id="view-scan" class="view active">
-    <div id="state-loading" class="hidden">
-      <div class="skel-hero"><div class="skel circle"></div><div class="skel-lines"><div class="skel w70"></div><div class="skel w90"></div><div class="skel w40"></div></div></div>
-      <div class="skel-score"><div class="skel num"></div><div class="skel-lines"><div class="skel w40"></div><div class="skel w90"></div></div></div>
-      <div class="skel bar"></div>
-      <div class="skel-grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+    <div id="state-loading" class="hidden" aria-busy="true">
+      <div class="skel-hero"><div class="skel av"></div><div class="skel-lines"><div class="skel w70"></div><div class="skel w90"></div><div class="skel w40"></div></div></div>
+      <div class="skel-lvl"><div class="skel tg"></div><div class="skel-lines"><div class="skel head w70"></div><div class="skel w90"></div></div></div>
+      <div class="skel-bal"><div class="skel w40"></div><div class="skel gauge"></div><div class="skel w40"></div><div class="skel gauge"></div></div>
+      <div class="skel-grid"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
       <p class="loading-step" id="loadingStep" role="status">Reading the page…</p>
     </div>
 
     <div id="state-empty" class="hidden">
       <div class="empty">
         <svg class="empty-art" viewBox="0 0 120 96" aria-hidden="true">
-          <rect x="14" y="14" width="76" height="62" rx="10" fill="var(--sunken)" stroke="var(--line)" stroke-width="2"/>
-          <circle cx="38" cy="38" r="10" fill="var(--line)"/>
-          <rect x="54" y="32" width="26" height="5" rx="2.5" fill="var(--line)"/>
-          <rect x="54" y="42" width="18" height="5" rx="2.5" fill="var(--line)"/>
-          <rect x="26" y="58" width="52" height="5" rx="2.5" fill="var(--line)"/>
+          <rect x="14" y="14" width="76" height="62" rx="4" fill="var(--raised)" stroke="var(--line2)" stroke-width="2"/>
+          <rect x="26" y="28" width="20" height="20" rx="2" fill="var(--line2)"/>
+          <rect x="54" y="30" width="26" height="5" rx="1" fill="var(--line2)"/>
+          <rect x="54" y="41" width="18" height="5" rx="1" fill="var(--line2)"/>
+          <rect x="26" y="58" width="52" height="5" rx="1" fill="var(--line2)"/>
           <circle cx="86" cy="62" r="14" fill="var(--bg)" stroke="var(--accent)" stroke-width="3.5"/>
           <path d="m96 72 10 10" stroke="var(--accent)" stroke-width="4.5" stroke-linecap="round"/>
         </svg>
@@ -64,7 +68,7 @@ const MARKUP = `
     </div>
 
     <div id="state-error" class="hidden">
-      <div class="empty">
+      <div class="empty error">
         <h2 id="errorTitle">Couldn't read this profile</h2>
         <p id="errorText"></p>
         <button id="retry" class="btn secondary">Try again</button>
@@ -107,11 +111,15 @@ function showState(id: (typeof STATES)[number]) {
   }
 }
 
+/** Aborts when the result on show is replaced or hidden, stopping its sends and checks. */
+let resultLife = new AbortController();
+
 async function scan(force = false) {
   const seq = ++scanSeq;
+  resultLife.abort();
   showState('state-loading');
   $('rescan').classList.add('spinning');
-  const res = await sendMessage<'FPR_SCAN'>({ type: 'FPR_SCAN', force }).catch((e): ErrorResponse => ({ error: 'panel_error', message: String(e) }));
+  const res = await sendMessage<'FPR_SCAN'>({ type: 'FPR_SCAN', force }).catch((e): ErrorResponse => panelError(e));
   if (seq !== scanSeq) return; // a newer scan started
   $('rescan').classList.remove('spinning');
 
@@ -129,54 +137,72 @@ async function scan(force = false) {
   $('result').innerHTML = renderResult(res);
   bindResult();
   showState('result');
+  paintDither($('result'));
 }
 
 // --- actions ---------------------------------------------------------------------
 function bindResult() {
   if (!current) return;
-  $('trackBtn').addEventListener('click', track);
-  const where = () => (settings && serverBase(settings) ? destinationLabel(settings) : null);
-  mountReport(scanKey(current), current.kind, where, invalidateLeaderboard);
+  $('trackBtn').addEventListener('click', saveOnly);
+  const dest = () => {
+    const base = settings ? serverBase(settings) : null;
+    return { base, label: base && settings ? destinationLabel(settings) : null };
+  };
+  resultLife = new AbortController();
+  mountReport(scanKey(current), current.kind, dest, invalidateLeaderboard, resultLife.signal);
+  if (current.kind === 'profile' && current.facts.memberId) mountRemoval($('removal'), current.facts.memberId, dest, resultLife.signal);
   $('result').querySelectorAll<HTMLImageElement>('.avatar img').forEach((img) =>
     img.addEventListener('error', () => img.remove(), { once: true }),
   );
+  const scoreBtn = $('scoreBtn');
+  scoreBtn.addEventListener('click', () => {
+    const open = scoreBtn.getAttribute('aria-expanded') !== 'true';
+    scoreBtn.setAttribute('aria-expanded', String(open));
+    scoreBtn.textContent = open ? 'Hide the score' : 'Show the score';
+    $('scoreDetail').hidden = !open;
+  });
 }
 
 /** Save without saying anything about it. */
-async function track() {
+async function saveOnly() {
   if (!current) return;
+  const key = scanKey(current);
   const btn = $<HTMLButtonElement>('trackBtn');
   const status = $('submitStatus');
   btn.disabled = true;
   btn.textContent = 'Saving…';
   status.className = 'status';
   status.textContent = '';
+  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key }).catch((e): ErrorResponse => panelError(e));
+  btn.disabled = !isError(res) || !!res.savedLocally;
+  btn.textContent = btn.disabled ? 'Saved ✓' : 'Save';
+  saved(res, key);
+}
 
-  const res: SubmitResponse = await sendMessage<'FPR_SUBMIT'>({ type: 'FPR_SUBMIT', key: scanKey(current) }).catch((e): ErrorResponse => ({
-    error: 'panel_error',
-    message: String(e),
-  }));
-  if (!isError(res)) {
-    btn.textContent = 'Saved ✓';
-    status.className = 'status ok';
-    if (!res.server) {
-      status.textContent = 'Saved in this browser.';
+function saved(res: SubmitResponse, key: string) {
+  const status = $('submitStatus');
+  if (isError(res)) {
+    if (!res.savedLocally) {
+      status.className = 'status err';
+      status.textContent = errorText(res);
       return;
     }
-    // The server scores without viewer-relative signals, so its number can differ.
-    const where = settings ? destinationLabel(settings) : 'the server';
-    const theirs = res.server.score != null && res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
-    status.textContent = `Saved to ${where}.${theirs}`;
+    showUnsent(errorText(res), async () => {
+      status.className = 'status';
+      status.textContent = 'Sending…';
+      saved(await sendMessage<'FPR_SYNC'>({ type: 'FPR_SYNC', key }).catch((e): ErrorResponse => panelError(e)), key);
+    });
     return;
   }
-  btn.disabled = !!res.savedLocally;
-  btn.textContent = res.savedLocally ? 'Saved ✓' : 'Track';
-  status.className = 'status err';
-  const MSG: Record<string, string> = {
-    daily_limit_reached: 'Daily limit reached. Try again tomorrow.',
-  };
-  const why = MSG[res.error] ?? res.message ?? res.error;
-  status.textContent = res.savedLocally ? `Saved in this browser, but not sent: ${why}` : why;
+  status.className = 'status ok';
+  if (!res.server) {
+    status.textContent = 'Saved in this browser.';
+    return;
+  }
+  // The server scores without viewer-relative signals, so its number can differ.
+  const where = settings ? destinationLabel(settings) : 'the server';
+  const theirs = res.server.score != null && current && res.server.score !== current.score.score ? ` It scores it ${res.server.score}/100.` : '';
+  status.textContent = `Saved to ${where}.${theirs}`;
 }
 
 // --- mount -----------------------------------------------------------------------
@@ -194,16 +220,19 @@ function bindTabs() {
   $('settingsBtn').addEventListener('click', () => showView($('view-settings').classList.contains('active') ? 'scan' : 'settings'));
 }
 
-/** Header and tabs follow Settings › Save to. */
+/** Header and tabs follow Settings › Save to; the page follows Appearance. */
 async function applySettings() {
+  const before = settings && serverBase(settings);
   settings = await getSettings();
+  applyPalette(settings.palette);
+  paintDither();
   const base = serverBase(settings);
   // Safari shows this UI as a popup, not a side panel.
   const surface = location.pathname.includes('popup') ? '' : 'Side Panel · ';
   $('apiBase').textContent = surface + (base ? `Saving to ${destinationLabel(settings)}` : 'Just me');
   $('boardTab').classList.toggle('hidden', !base);
   if (!base && $('view-board').classList.contains('active')) showView('saved');
-  invalidateLeaderboard();
+  if (base !== before) invalidateLeaderboard();
 }
 
 /** Follow the active tab: rescan when it lands on a different profile. */
@@ -251,7 +280,9 @@ async function announcePanel() {
 }
 
 export async function mountPanel() {
+  applyMirroredPalette();
   document.body.innerHTML = MARKUP;
+  watchDither(document.body);
   bindTabs();
   bindSettings();
   onSettingsChanged(applySettings);

@@ -2,7 +2,7 @@
 // compare with this browser's history of the same profile, company, or job.
 
 import { compactJobFacts, diffCompanyFacts, diffJobFacts, observeProfile, type FactChange, type ProfileFacts, type ProfilePart } from '@fpr/core/linkedin';
-import { scoreCompany, scoreJob, scoreProfile } from '@fpr/core/scam';
+import { SCORE_VERSION, scoreCompany, scoreJob, scoreProfile } from '@fpr/core/scam';
 import { activeLinkedInTab, linkedin } from '@/lib/linkedin/client';
 import { CodedError, errorText } from '@/lib/runtime';
 import { targetKey, type ScanResponse, type ScanResult } from './messages';
@@ -39,7 +39,12 @@ const scans = bounded(sessionArea, 'scan', 20);
 const snapshots = bounded(sessionArea, 'snap', 5);
 const history = bounded(browser.storage.local, 'hist', 300);
 
-export const cachedScan = (key: string) => scans.get<ScanResult>(key).catch(() => undefined);
+/** A cached scan, unless it was scored under other rules: those are scanned again, not shown. */
+export const cachedScan = (key: string) =>
+  scans
+    .get<ScanResult>(key)
+    .then((hit) => (hit?.score.version === SCORE_VERSION ? hit : undefined))
+    .catch(() => undefined);
 /** The gzipped raw snapshot behind a cached profile scan, if still kept. */
 export const cachedSnapshot = (key: string) => snapshots.get<string>(key).catch(() => undefined);
 

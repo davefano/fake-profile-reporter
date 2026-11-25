@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { normalizeServer } from '../lib/saves/settings';
-import { exportFile, mergeItem, parseExport, pendingFor, reportsPendingFor, saveStore, type Area, type LocalReport, type SavedItem } from '../lib/saves/store';
+import { exportFile, mergeItem, ownerChanged, parseExport, pendingFor, reportsPendingFor, saveStore, type Area, type LocalReport, type SavedItem } from '../lib/saves/store';
 
 function fakeArea(): Area {
   const data = new Map<string, unknown>();
@@ -25,6 +25,8 @@ const item = (o: Partial<SavedItem> = {}): SavedItem => ({
   level: 'high',
   savedAt: 1_000,
   report: null,
+  withdrawnAt: null,
+  heldBy: {},
   uploadedTo: [],
   payload: { kind: 'company', id: '4242', facts: {} as any },
   ...o,
@@ -36,7 +38,6 @@ const report = (o: Partial<LocalReport> = {}): LocalReport => ({
   confidence: 'suspected',
   note: 'Asked me to pay for training.',
   at: 4_000,
-  sentTo: [],
   ...o,
 });
 
@@ -91,31 +92,57 @@ describe('saveStore', () => {
 });
 
 describe('reports', () => {
-  test('a report is sent once per server, and only in the version that was sent', async () => {
-    const s = saveStore(fakeArea());
-    await s.put(item({ report: report() }));
-    expect(reportsPendingFor(await s.list(), 'https://a.example')).toHaveLength(1);
-    await s.markReportSent(item().key, 'https://a.example', 3_999); // an older version: ignored
-    expect(reportsPendingFor(await s.list(), 'https://a.example')).toHaveLength(1);
-    await s.markReportSent(item().key, 'https://a.example', 4_000);
-    expect(reportsPendingFor(await s.list(), 'https://a.example')).toEqual([]);
-    await s.setReport(item().key, null); // withdrawn
-    expect((await s.get(item().key))?.report).toBeNull();
+  test('a report is pending for a server until it holds this version; a tombstone until it is withdrawn there', () => {
+    const a = 'https://a.example';
+    expect(reportsPendingFor([item({ report: report() })], a)).toHaveLength(1);
+    expect(reportsPendingFor([item({ report: report(), heldBy: { [a]: 3_999 } })], a)).toHaveLength(1); // an older version
+    expect(reportsPendingFor([item({ report: report(), heldBy: { [a]: null } })], a)).toHaveLength(1); // sent, not confirmed
+    expect(reportsPendingFor([item({ report: report(), heldBy: { [a]: 4_000 } })], a)).toEqual([]);
+    expect(reportsPendingFor([item({ withdrawnAt: 5_000, heldBy: { [a]: 4_000 } })], a)).toHaveLength(1);
+    expect(reportsPendingFor([item({ withdrawnAt: 5_000 })], a)).toEqual([]);
   });
 
-  test('saves from before reasons existed become a report with reason "Other", not yet sent', async () => {
+  test('saves from before reports had reasons become a report with reason "Other", held nowhere', async () => {
     const area = fakeArea();
-    const { report: _r, targetId: _t, ...old } = item();
+    const { report: _r, targetId: _t, withdrawnAt: _w, heldBy: _h, ...old } = item();
     await area.set({ 'saves:index': [old.key], [`save:${old.key}`]: { ...old, reportedAt: 4_000, uploadedTo: ['https://a.example'] } });
     const got = await saveStore(area).get(old.key);
-    expect(got?.report).toEqual({ stance: 'report', reasons: ['other'], confidence: 'suspected', note: null, at: 4_000, sentTo: [] });
-    expect(got?.targetId).toBe('4242'); // from the company payload
+    expect(got?.report).toEqual({ stance: 'report', reasons: ['other'], confidence: 'suspected', note: null, at: 4_000 });
+    expect(got).toMatchObject({ targetId: '4242', withdrawnAt: null, heldBy: {} }); // target ID from the company payload
     expect(got).not.toHaveProperty('reportedAt');
   });
 
   test('the newer report wins a merge', () => {
     const merged = mergeItem(item({ report: report({ at: 4_000 }) }), item({ savedAt: 900, report: report({ stance: 'vouch', reasons: ['know-personally'], confidence: null, at: 5_000 }) }));
     expect(merged.report?.stance).toBe('vouch');
+  });
+
+  test('importing an older report does not bring back a newer withdrawal; heldBy is the union', () => {
+    const have = item({ report: null, withdrawnAt: 6_000, heldBy: { 'https://a.example': null } });
+    const merged = mergeItem(have, item({ savedAt: 2_000, report: report({ at: 4_000 }), heldBy: { 'https://b.example': 4_000 } }));
+    expect(merged).toMatchObject({ report: null, withdrawnAt: 6_000 });
+    expect(merged.heldBy).toEqual({ 'https://a.example': null, 'https://b.example': null });
+    // A newer report beats an older withdrawal, and keeps what's confirmed for it.
+    const back = mergeItem(have, item({ report: report({ at: 7_000 }), heldBy: { 'https://b.example': 7_000 } }));
+    expect(back).toMatchObject({ report: report({ at: 7_000 }), withdrawnAt: null, heldBy: { 'https://a.example': null, 'https://b.example': 7_000 } });
+  });
+});
+
+describe('ownerChanged', () => {
+  const profile = (o: Partial<SavedItem> = {}) =>
+    item({ key: 'profile:some-slug', kind: 'profile', targetId: '111', url: 'https://www.linkedin.com/in/some-slug/', payload: { kind: 'profile', snapshotGzipBase64: 'H4sI' }, ...o });
+
+  test('a profile URL now on another member: the old save moves to its own key, with its report and servers', () => {
+    const prev = profile({ report: report(), heldBy: { 'https://a.example': 4_000 } });
+    expect(ownerChanged(prev, '222')).toEqual({ ...prev, key: 'profile:some-slug#111' });
+  });
+
+  test('the same member, an unknown ID, or a company: nothing moves', () => {
+    expect(ownerChanged(profile(), '111')).toBeNull();
+    expect(ownerChanged(profile({ targetId: null }), '222')).toBeNull();
+    expect(ownerChanged(profile(), null)).toBeNull();
+    expect(ownerChanged(undefined, '222')).toBeNull();
+    expect(ownerChanged(item(), '9999')).toBeNull();
   });
 });
 
@@ -129,14 +156,14 @@ describe('mergeItem', () => {
 describe('export and import', () => {
   test('round trips', () => {
     const items = [item(), item({ key: 'profile:someone', kind: 'profile', url: 'https://uk.linkedin.com/in/someone/', payload: { kind: 'profile', snapshotGzipBase64: 'H4sI' } })];
-    expect(parseExport(exportFile(items, KEY))).toEqual({ items, skipped: 0, reporterKey: KEY });
+    expect(parseExport(exportFile(items, KEY))).toEqual({ items, skipped: 0, masterKey: KEY });
   });
 
-  test('carries reports and the reporter key; ignores a key that is not one', () => {
-    const items = [item({ report: report({ sentTo: ['https://a.example'] }) })];
-    expect(parseExport(exportFile(items, KEY)).items[0]!.report).toEqual(report({ sentTo: ['https://a.example'] }));
-    expect(parseExport(exportFile(items, null)).reporterKey).toBeNull();
-    expect(parseExport(exportFile(items, 'short')).reporterKey).toBeNull();
+  test('carries reports, tombstones, heldBy and the master key; ignores a key that is not one', () => {
+    const items = [item({ report: report(), heldBy: { 'https://a.example': 4_000 } }), item({ key: 'company:gone', url: 'https://www.linkedin.com/company/gone/', withdrawnAt: 5_000, heldBy: { 'https://b.example': null } })];
+    expect(parseExport(exportFile(items, KEY)).items).toEqual(items);
+    expect(parseExport(exportFile(items, null)).masterKey).toBeNull();
+    expect(parseExport(exportFile(items, 'short')).masterKey).toBeNull();
   });
 
   test('reads version 1 exports, including the old name', () => {
@@ -144,7 +171,7 @@ describe('export and import', () => {
     const v1 = JSON.stringify({ format: 'fake-linkedin-reporter/saves', version: 1, exportedAt: 1, items: [{ ...old, reportedAt: 4_000 }] });
     const got = parseExport(v1);
     expect(got.skipped).toBe(0);
-    expect(got.reporterKey).toBeNull();
+    expect(got.masterKey).toBeNull();
     expect(got.items[0]!.report).toMatchObject({ stance: 'report', reasons: ['other'], at: 4_000 });
   });
 
@@ -161,8 +188,12 @@ describe('export and import', () => {
       item({ report: report({ stance: 'impersonated', reasons: ['contacted-me'] }) }), // companies can't be impersonated
       item({ report: report({ reasons: ['know-personally'] }) }), // a vouch reason on a report
       item({ report: report({ note: 'x'.repeat(501) }) }),
+      item({ heldBy: { 'https://a.example': 'yes' as any } }),
+      item({ heldBy: ['https://a.example'] as any }),
+      item({ heldBy: { 'javascript:alert(1)': null } }), // keys are server origins
+      item({ report: report(), withdrawnAt: 'soon' as any }),
     ];
     const text = exportFile([item(), ...(bad as SavedItem[])], null);
-    expect(parseExport(text)).toEqual({ items: [item()], skipped: bad.length, reporterKey: null });
+    expect(parseExport(text)).toEqual({ items: [item()], skipped: bad.length, masterKey: null });
   });
 });

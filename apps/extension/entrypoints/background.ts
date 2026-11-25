@@ -1,13 +1,14 @@
 // Background: the toolbar toggle, and routing for the scam-check feature.
 
-import type { LeaderboardResponse } from '@fpr/core/wire';
+import type { LeaderboardResponse, RemovalResponse } from '@fpr/core/wire';
 import { api } from '@/lib/api';
 import { serve } from '@/lib/runtime';
+import { reporterKeyFor } from '@/lib/saves/reporter';
 import { getSettings, serverBase } from '@/lib/saves/settings';
 import { uploadPending } from '@/lib/saves/upload';
 import type { AppMessages } from '@/lib/scan/messages';
 import { scan } from '@/lib/scan/scan';
-import { submit, withdraw } from '@/lib/scan/submit';
+import { submit, sync, verify, verifyWait, withdraw } from '@/lib/scan/submit';
 import { setUpToolbarToggle } from '@/lib/toolbar';
 
 const NO_SERVER = { error: 'no_server', message: 'Saves stay in this browser. Pick a server in Settings to see reports.' };
@@ -21,9 +22,17 @@ export default defineBackground({
       FPR_SCAN: (msg) => scan(!!msg.force),
       FPR_SUBMIT: (msg) => submit(msg.key, msg.report),
       FPR_WITHDRAW: (msg) => withdraw(msg.key),
+      FPR_SYNC: (msg) => sync(msg.key),
+      FPR_VERIFY: (msg) => verify(msg.server, msg.token, msg.challenge),
+      FPR_VERIFY_WAIT: (msg) => verifyWait(msg.server, msg.key),
       FPR_LEADERBOARD: async () => {
         const base = serverBase(await getSettings());
         return base ? api<LeaderboardResponse>(base, 'GET', '/api/leaderboard?limit=50') : NO_SERVER;
+      },
+      FPR_REMOVAL: async ({ memberId, code, contact }) => {
+        const base = serverBase(await getSettings());
+        const body = { memberId, code, ...(contact !== undefined && { contact }) };
+        return base ? api<RemovalResponse>(base, 'POST', '/api/removals', body, await reporterKeyFor(base)) : NO_SERVER;
       },
       FPR_UPLOAD: async () => {
         const base = serverBase(await getSettings());

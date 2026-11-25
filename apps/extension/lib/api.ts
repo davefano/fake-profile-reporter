@@ -3,6 +3,9 @@
 
 import type { ErrorResponse } from '@/lib/runtime';
 
+/** An error from the API. `verifyUrl` comes with `verification_required` (wire.ts VerificationRequired). */
+export type ApiError = ErrorResponse & { verifyUrl?: string };
+
 /** `reporterKey` identifies this browser's reports (see lib/saves/reporter.ts). */
 export async function api<T>(
   base: string,
@@ -10,7 +13,7 @@ export async function api<T>(
   path: string,
   body?: Uint8Array | object,
   reporterKey?: string,
-): Promise<T | ErrorResponse> {
+): Promise<T | ApiError> {
   const headers: Record<string, string> = {};
   if (body) headers['content-type'] = 'application/json';
   if (reporterKey) headers['x-reporter-key'] = reporterKey;
@@ -24,8 +27,11 @@ export async function api<T>(
   } catch {
     return { error: 'network_error', message: `Can't reach ${new URL(base).host}.` };
   }
-  const data = (await res.json().catch(() => null)) as (T & { error?: string }) | null;
-  if (!res.ok) return { error: data?.error ?? `http_${res.status}`, message: data?.error ? undefined : `The server answered HTTP ${res.status}.` };
+  const data = (await res.json().catch(() => null)) as (T & { error?: string; verifyUrl?: unknown }) | null;
+  if (!res.ok) {
+    if (!data?.error) return { error: `http_${res.status}`, message: `The server answered HTTP ${res.status}.` };
+    return { error: data.error, ...(typeof data.verifyUrl === 'string' && { verifyUrl: data.verifyUrl }) };
+  }
   if (!data || typeof data !== 'object') return { error: 'bad_response', message: 'The server sent an unexpected response.' };
   return data;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { captureProfile, diffProfileFacts, observeProfile, estimateJoinedAt, extractProfileFacts, memberIdFromProfileId, parseAbout, parseCountText, postTimestampMs, rscTexts } from '../src/linkedin';
-import { scoreProfile } from '../src/scam';
+import { SCORE_VERSION, finishScore, levelFor, scoreProfile, type Signal } from '../src/scam';
 import { DAY, fakeSnapshot, postIdAt, profileIdFor } from './fixtures';
 
 const NOW = Date.UTC(2026, 10, 17);
@@ -262,8 +262,26 @@ describe('scoreProfile', () => {
     );
     const s = scoreProfile({ ...f, influencer: true }, NOW);
     expect(s.signals.find((x) => x.id === 'pattern.career-vs-age')?.kind).toBe('discrepancy');
-    expect(s.score).toBeLessThan(35);
+    expect(s.score).toBeLessThan(30);
+    expect(s.signals.find((x) => x.id === 'pattern.career-vs-age')?.floor).toBe('medium');
     expect(s.level).toBe('medium');
+  });
+
+  test('scores carry the current rules version', () => {
+    expect(SCORE_VERSION).toBe(6);
+    expect(scoreProfile(extractProfileFacts(fakeSnapshot(), NOW), NOW).version).toBe(6);
+  });
+
+  test('signals without strength, detail or floor pass through unchanged', () => {
+    // The shape of a version-5 score's signals, as stored.
+    const old: Signal[] = [
+      { id: 'pattern.career-vs-age', label: 'Claims 16 years of work history on a new account', weight: 18, kind: 'discrepancy' },
+      { id: 'trust.influencer', label: 'LinkedIn Top Voice / influencer', weight: -10, kind: 'trust' },
+    ];
+    const s = finishScore(old.map((x) => ({ ...x })), []);
+    expect(s.signals).toEqual(old);
+    expect(s.score).toBe(8);
+    expect(s.level).toBe('low');
   });
 
   test('an old faceless, inactive account is flagged as a possible shell', () => {
@@ -308,7 +326,55 @@ describe('scoreProfile', () => {
     // The trust a resold account would carry over is discounted.
     expect(byId['age.established']?.weight).toBe(0);
     expect(byId['verified.other']?.weight).toBe(-6);
-    expect(s.level).not.toBe('low');
+    expect(byId['verified.other']?.label).not.toContain('may predate');
+    expect(byId['verified.other']?.detail).toBe('may predate a change of owner');
+    expect(byId['verified.other']?.strength).toBe('minor');
+    expect(byId['aged.industry-mismatch']?.label).not.toContain('(');
+    expect(byId['aged.industry-mismatch']?.detail).toBe('can be left over from an earlier persona');
+    expect(byId['pattern.aged-resale']?.strength).toBe('major');
+    expect(s.level).toBe('high');
+  });
+
+  // Four changed-hands signs: recent banner, industry left over, default URL, surname initial.
+  const fourSigns = (verifications: Array<[string, string]>) => {
+    const base = extractProfileFacts(
+      fakeSnapshot({
+        slug: 'sam-q-48213907',
+        lastName: 'Q.',
+        headline: 'Senior AI Software Engineer | Full-Stack | Cloud',
+        joinedAt: Date.UTC(2010, 7, 15),
+        postTimes: [],
+        verifications,
+      }),
+      NOW,
+    );
+    return { ...base, industry: 'Security & Investigations', background: { present: true, uploadedAt: NOW - 20 * DAY } };
+  };
+
+  test('four changed-hands signs reach high even when the number is lower', () => {
+    const s = scoreProfile(fourSigns([['Example Corp', 'Verified using work email in March 2019']]), NOW);
+    const resale = s.signals.find((x) => x.id === 'pattern.aged-resale');
+    expect(resale?.weight).toBe(18);
+    expect(resale?.floor).toBe('high');
+    expect(s.score).toBeLessThan(60);
+    expect(s.level).toBe('high');
+  });
+
+  test('identity verification caps the changed-hands floor at medium', () => {
+    const s = scoreProfile(fourSigns([['Identity', 'Verified by LinkedIn in May 2025']]), NOW);
+    expect(s.signals.find((x) => x.id === 'pattern.aged-resale')?.floor).toBe('medium');
+    expect(s.signals.find((x) => x.id === 'verified.identity')?.strength).toBe('major');
+    expect(s.level).toBe('medium');
+  });
+
+  test('three changed-hands signs follow the number', () => {
+    const f = fourSigns([['Example Corp', 'Verified using work email in March 2019']]);
+    const s = scoreProfile({ ...f, background: { present: true, uploadedAt: null } }, NOW);
+    const resale = s.signals.find((x) => x.id === 'pattern.aged-resale');
+    expect(resale?.weight).toBe(12);
+    expect(resale?.floor).toBeUndefined();
+    expect(s.signals.some((x) => x.floor === 'high')).toBe(false);
+    expect(s.level).toBe(levelFor(s.score));
   });
 
   test('a long-standing, lived-in account keeps its trust', () => {
@@ -321,6 +387,8 @@ describe('scoreProfile', () => {
     expect(ids.filter((id) => id.startsWith('aged.') || id === 'pattern.aged-resale')).toEqual([]);
     expect(s.signals.find((x) => x.id === 'age.established')?.weight).toBe(-8);
     expect(s.signals.find((x) => x.id === 'verified.other')?.weight).toBe(-12);
+    expect(s.signals.find((x) => x.id === 'verified.other')?.strength).toBe('major');
+    expect(s.signals.some((x) => x.floor)).toBe(false);
   });
 
   test('one or two resale signs alone are not a pattern', () => {
@@ -344,7 +412,7 @@ describe('scoreProfile', () => {
     const ids = s.signals.map((x) => x.id);
     expect(ids).not.toContain('photo.none');
     expect(ids).not.toContain('aged.shell');
-    expect(s.missing).toContain('Profile photo (hidden from your account)');
+    expect(s.missing).toContain("Profile photo (none shown to you: there may be none, or it's limited to their network)");
     expect(extractProfileFacts(fakeSnapshot({ photoUploadedAt: null }), NOW).photo).toEqual({ present: false, uploadedAt: null });
   });
 

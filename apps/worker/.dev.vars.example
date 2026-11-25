@@ -1,1 +1,14 @@
 IP_SALT=dev-salt
+
+# Bot check, optional. Leave VERIFY_HOST unset to run without it. To try it
+# locally, run `wrangler dev --local-protocol https` and use Turnstile's test
+# keys (https://developers.cloudflare.com/turnstile/troubleshooting/testing/).
+# They render the widget; their Siteverify answers may not carry this host,
+# action and cData, so a full pass needs a real widget for the host.
+# VERIFY_HOST=localhost:8787
+# TURNSTILE_SITEKEY=1x00000000000000000000AA
+# TURNSTILE_SECRET=1x0000000000000000000000000000000AA
+
+# Admin routes for removal requests, optional. 32+ random bytes, base64url;
+# they answer 404 while this is unset or short.
+# ADMIN_TOKEN=

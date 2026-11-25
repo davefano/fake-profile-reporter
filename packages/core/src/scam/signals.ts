@@ -11,7 +11,7 @@ export function levelFor(score: number): RiskLevel {
 }
 
 
-export const SCORE_VERSION = 5;
+export const SCORE_VERSION = 6;
 
 /**
  * - `discrepancy`: the profile's claims don't fit together. A verification task, not proof.
@@ -25,6 +25,12 @@ export interface Signal {
   label: string;
   weight: number;
   kind: SignalKind;
+  /** Set by scorers on patterns and verifications. Absent: |weight| ≥ 12 reads as major. */
+  strength?: 'major' | 'minor';
+  /** A second line: why the signal matters. */
+  detail?: string;
+  /** The lowest level this signal allows, whatever the number says. */
+  floor?: Exclude<RiskLevel, 'low'>;
 }
 
 export interface Score {
@@ -38,23 +44,44 @@ export interface Score {
 
 // A discrepancy this strong keeps the level at least medium, however much
 // trust the rest of the profile earns.
-const OVERRIDE_WEIGHT = 15;
+const MEDIUM_FLOOR_WEIGHT = 15;
+
+export type SignalOptions = Pick<Signal, 'strength' | 'detail' | 'floor'> & { kind?: SignalKind };
 
 /**
- * `add(id, label, weight, kind?)`. Without an explicit kind: negative weights
- * are trust, `pattern.*` ids are discrepancies, everything else is weak.
+ * `add(id, label, weight, kindOrOptions?)`. Without an explicit kind: negative
+ * weights are trust, `pattern.*` ids are discrepancies, everything else is weak.
+ * A discrepancy of weight ≥ 15 gets a medium floor unless one is given.
  */
 export function signalAdder(signals: Signal[]) {
-  return (id: string, label: string, weight: number, kind?: SignalKind) =>
-    signals.push({ id, label, weight, kind: kind ?? (weight < 0 ? 'trust' : id.startsWith('pattern.') ? 'discrepancy' : 'weak') });
+  return (id: string, label: string, weight: number, opts?: SignalKind | SignalOptions) => {
+    const { kind: k, ...extra } = typeof opts === 'string' ? { kind: opts } : (opts ?? {});
+    const kind = k ?? (weight < 0 ? 'trust' : id.startsWith('pattern.') ? 'discrepancy' : 'weak');
+    const signal: Signal = { id, label, weight, kind };
+    const floor = extra.floor ?? (kind === 'discrepancy' && weight >= MEDIUM_FLOOR_WEIGHT ? 'medium' : undefined);
+    if (extra.strength) signal.strength = extra.strength;
+    if (extra.detail) signal.detail = extra.detail;
+    if (floor) signal.floor = floor;
+    signals.push(signal);
+  };
 }
 
-/** Sum, clamp, sort, and apply the discrepancy override. Shared by every scorer. */
+/** Levels in order, for comparing them. */
+export const RANK: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2 };
+
+/** A signal's strength; stored scores before rules v6 have none, so |weight| ≥ 12 reads as major. A zero weight earns nothing. */
+export function signalStrength(x: Signal): 'major' | 'minor' | 'none' {
+  if (x.strength) return x.strength;
+  if (x.weight === 0) return 'none';
+  return Math.abs(x.weight) >= 12 ? 'major' : 'minor';
+}
+
+/** Sum, clamp, sort, and raise the level to the highest floor. Shared by every scorer. */
 export function finishScore(signals: Signal[], missing: string[]): Score {
   const raw = signals.reduce((s, x) => s + x.weight, 0);
   const score = Math.max(0, Math.min(100, Math.round(raw)));
   signals.sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight));
   let level = levelFor(score);
-  if (level === 'low' && signals.some((x) => x.kind === 'discrepancy' && x.weight >= OVERRIDE_WEIGHT)) level = 'medium';
+  for (const x of signals) if (x.floor && RANK[x.floor] > RANK[level]) level = x.floor;
   return { version: SCORE_VERSION, score, level, signals, missing };
 }

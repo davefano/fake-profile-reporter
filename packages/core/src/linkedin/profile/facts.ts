@@ -100,8 +100,9 @@ function ym(d: any): YearMonth | null {
 /**
  * Whether there's an image, and its upload time from the artifact paths
  * (…/0/1696284332069). No field at all means no image. A field with the image
- * stripped out means the member hid it from this viewer (photo visibility set
- * to their network, say): unknown, so null.
+ * stripped out is unknown, so null: LinkedIn sends the same shape when the
+ * member has no photo and when they limit it to their network, and the About
+ * dialog leaves out its "Profile photo" line in both cases.
  */
 function imageInfo(pic: any): { present: boolean; uploadedAt: number | null } | null {
   if (pic == null) return { present: false, uploadedAt: null };
